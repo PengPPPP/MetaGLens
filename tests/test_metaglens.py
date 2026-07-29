@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -811,6 +812,159 @@ class TestParallelPlanner(unittest.TestCase):
         self.assertFalse(plan.memory_capped)
         self.assertEqual(plan.jobs, 8)
         self.assertIn("RAM unknown", plan.reason)
+
+
+class TestSharedTheme(unittest.TestCase):
+    """Phase 4.2: report sources the shared visual module; output unchanged."""
+
+    def test_report_uses_shared_theme_objects(self):
+        from metaglens import report, _theme
+        self.assertIs(report._CSS, _theme.REPORT_CSS)
+        self.assertIs(report._LENS, _theme.LENS_SVG)
+
+    def test_report_still_contains_skin_and_data(self):
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        (d / "pipeline_status.json").write_text(json.dumps({
+            "project_name": "demo", "route_name": "mag_per_sample",
+            "analysis_basis": "mag", "samples": ["A"],
+            "selected_steps": ["00_setup", "10_community"],
+            "steps": {"10_community": {"status": "running", "attempts": 1}},
+        }), encoding="utf-8")
+        (d / "delivery" / "community").mkdir(parents=True)
+        (d / "delivery" / "community" / "community_matrix.tsv").write_text(
+            "taxon\tA\ng__Foo\t9\n", encoding="utf-8")
+        out = generate_report(d, raw_data_dir="/data/reads")
+        html = out.read_text(encoding="utf-8")
+        self.assertIn("--brand:#38A8F0", html)          # palette
+        self.assertIn('points="100,4 183.14,52', html)  # lens polygon
+        self.assertIn("window.__MG__", html)
+        self.assertIn('"demo"', html)
+
+
+class TestWebConfig(TempDirCase):
+    """Phase 4: web config backends, equivalence, i18n, security."""
+
+    def _payload(self) -> dict:
+        raw = self.tmp / "raw"
+        _make_reads(raw, ["A", "B"])
+        return dict(
+            project_name="demo",
+            work_dir=str(self.tmp / "work"),
+            raw_data_dir=str(raw),
+            route_name="mag_per_sample",
+            total_threads=16,
+            taxonomy_tool="gtdbtk",
+            contig_taxonomy="none",
+            use_eggnog=True,
+        )
+
+    def test_save_equivalent_to_direct_to_yaml(self):
+        from metaglens.express import webconfig
+        payload = self._payload()
+        out_web = str(self.tmp / "web.yaml")
+        out_dir = str(self.tmp / "direct.yaml")
+        ok, errs, _ = webconfig.save_config(payload, out_web)
+        self.assertTrue(ok, errs)
+        Config(**webconfig.coerce_payload(payload)).to_yaml(out_dir)
+        self.assertEqual(Path(out_web).read_bytes(), Path(out_dir).read_bytes())
+
+    def test_language_does_not_pollute_yaml(self):
+        from metaglens.express import webconfig
+        base = self._payload()
+        a = str(self.tmp / "zh.yaml")
+        b = str(self.tmp / "en.yaml")
+        ok1, _, _ = webconfig.save_config(dict(base, lang="zh"), a)
+        ok2, _, _ = webconfig.save_config(dict(base, lang="en"), b)
+        self.assertTrue(ok1 and ok2)
+        self.assertEqual(Path(a).read_bytes(), Path(b).read_bytes())
+
+    def test_invalid_payload_returns_errors_and_writes_nothing(self):
+        from metaglens.express import webconfig
+        out = str(self.tmp / "bad.yaml")
+        ok, errs, _ = webconfig.save_config(
+            {"project_name": "", "work_dir": "", "raw_data_dir": ""}, out)
+        self.assertFalse(ok)
+        self.assertTrue(errs)
+        self.assertFalse(Path(out).exists())
+
+    def test_api_hardware_and_plan(self):
+        from metaglens.express import webconfig
+        hw = webconfig.api_hardware()
+        self.assertGreaterEqual(hw["cores"], 1)
+        plan = webconfig.api_plan(64, 64, 10)
+        self.assertTrue(plan["memory_capped"])
+        self.assertIn("reason", plan)
+
+    def test_api_samples(self):
+        from metaglens.express import webconfig
+        raw = self.tmp / "raw"
+        _make_reads(raw, ["A", "B"])
+        res = webconfig.api_samples(str(raw))
+        self.assertTrue(res["ok"])
+        self.assertEqual(len(res["samples"]), 2)
+
+    def test_api_db_validate_and_required(self):
+        from metaglens.express import webconfig
+        root = self.tmp / "gtdbtk_data" / "release232"
+        (root / "taxonomy").mkdir(parents=True)
+        (root / "taxonomy" / "gtdb_taxonomy.tsv").write_text("x\n", encoding="utf-8")
+        (root / "metadata").mkdir(parents=True)
+        (root / "metadata" / "metadata.txt").write_text(
+            "VERSION_DATA=r232\n", encoding="utf-8")
+        res = webconfig.api_db("gtdbtk", str(root))
+        self.assertTrue(res["ok"])
+        req = webconfig.api_required_dbs(
+            {"route_name": "mag_per_sample", "taxonomy_tool": "gtdbtk",
+             "use_eggnog": "true", "work_dir": str(self.tmp)})
+        self.assertIn("gtdbtk", req["required"])
+
+    def test_build_page_has_token_langs_and_skin(self):
+        from metaglens.express import webconfig
+        page = webconfig.build_page("TOK123", lang="zh")
+        self.assertIn("TOK123", page)
+        self.assertIn("--brand:#38A8F0", page)          # shared palette
+        self.assertIn('points="100,4 183.14,52', page)  # shared lens
+        self.assertIn("zh:", page)                       # bilingual dicts
+        self.assertIn("en:", page)
+
+    def test_live_server_token_and_save(self):
+        import urllib.request
+        import urllib.error
+        from metaglens.express import webconfig
+
+        out = str(self.tmp / "served.yaml")
+        server = webconfig._ConfigServer(
+            ("127.0.0.1", 0), webconfig._Handler,
+            token="secrettok", out_path=out, lang="zh")
+        # Confirm we never bind a routable interface.
+        self.assertEqual(server.server_address[0], "127.0.0.1")
+        port = server.server_address[1]
+        th = threading.Thread(target=server.serve_forever, daemon=True)
+        th.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        base = f"http://127.0.0.1:{port}"
+        try:
+            # No token -> 403.
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(base + "/", timeout=5)
+            self.assertEqual(ctx.exception.code, 403)
+            # With token -> 200 HTML.
+            with urllib.request.urlopen(base + "/?token=secrettok", timeout=5) as r:
+                self.assertEqual(r.status, 200)
+                self.assertIn(b"MetaGLens", r.read())
+            # POST /save with a valid payload writes the yaml.
+            body = json.dumps(self._payload()).encode("utf-8")
+            req = urllib.request.Request(
+                base + "/save?token=secrettok", data=body,
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                self.assertEqual(r.status, 200)
+                self.assertTrue(json.loads(r.read())["ok"])
+            self.assertTrue(Path(out).is_file())
+        finally:
+            pass
 
 
 if __name__ == "__main__":
