@@ -134,10 +134,10 @@ POST 回写 `metaglens.yaml`。
 **目标**:本地网页配置,实时调用 Phase 1–3 的能力。
 
 **步骤**
-- [ ] 4.1 新建 `metaglens/express/__init__.py`、`metaglens/express/webconfig.py`,
+- [x] 4.1 新建 `metaglens/express/__init__.py`、`metaglens/express/webconfig.py`,
   基于 stdlib `http.server.ThreadingHTTPServer`。绑 `127.0.0.1`、端口用 `0`(系统分配),
   生成一次性 token,URL 带 `?token=`;所有请求校验 token,否则 403。
-- [ ] 4.2 **先抽共享视觉模块**(防漂移):把 `report.py` 里的 `_CSS` 调色板与 `_LENS`
+- [x] 4.2 **先抽共享视觉模块**(防漂移):把 `report.py` 里的 `_CSS` 调色板与 `_LENS`
   透镜 SVG 抽到 `metaglens/express/theme.py`(或 `metaglens/_theme.py`),`report.py` 改为
   import 它、行为不变(**回归:重建一次报告,`window.__MG__` 数据与关键 DOM 不变**)。
   然后 `GET /`:返回**自包含 HTML**表单,复用该共享主题(内嵌、不引外部资源),
@@ -148,22 +148,22 @@ POST 回写 `metaglens.yaml`。
   - **语言切换**:页面顶部放 中文/English 切换;所有 label 与帮助文案**双语内置**
     (建议 JS 里存 `I18N = {zh:{...}, en:{...}}`,切换即重渲染,无需刷新)。
     默认语言:CLI `--lang` > `Accept-Language` > 中文。**切语言不影响任何将写入 yaml 的值。**
-- [ ] 4.3 只读 JSON 接口(供前端实时用):
+- [x] 4.3 只读 JSON 接口(供前端实时用):
   - `GET /api/samples?dir=` → 调 `samples.discover()`,回样本清单 + 配对约定;
   - `GET /api/hardware` → Phase 1;
   - `GET /api/plan?cores=&ram=&n=` → Phase 3 推荐 + 理由;
   - `GET /api/db?name=&path=` → Phase 2 校验/发现,缺失时回 `download_hint`;
   - `GET /api/required-dbs?...` → Phase 2 required_databases。
-- [ ] 4.4 `POST /save`:用 `Config(**payload)` 构造 → `validate()`;不通过回错误清单;
+- [x] 4.4 `POST /save`:用 `Config(**payload)` 构造 → `validate()`;不通过回错误清单;
   通过则 `to_yaml()` 写 `metaglens.yaml`,回成功页(附下一步命令 `metaglens run`)。
-- [ ] 4.5 `cli.py` 加 `configure` 命令:起服务、`webbrowser.open` 自动开(带 `--no-browser`);
+- [x] 4.5 `cli.py` 加 `configure` 命令:起服务、`webbrowser.open` 自动开(带 `--no-browser`);
   终端打印 URL+token;`Ctrl-C` 优雅关停。headless 时不报错,只打印 URL 让用户端口转发。
-- [ ] 4.6 **对等测试**:构造一份 payload,分别经 web 的 `/save` 路径与直接 `Config.to_yaml`
+- [x] 4.6 **对等测试**:构造一份 payload,分别经 web 的 `/save` 路径与直接 `Config.to_yaml`
   产出 yaml,断言两者一致;`/api/*` 各接口的纯逻辑测试(不起真服务,直接测 handler 函数)。
   **另加**:切换语言后 POST 同样输入,产出的 yaml **逐字节一致**(证明 i18n 不污染配置);
   抽出共享主题后 `report.py` 重建报告的回归测试仍绿。
-- [ ] 4.7 commit `feat(express): metaglens configure — local web config (approach B)`。
-- [ ] 4.8 **配置入口引导(用户要求③)**:`cli.py` 的 `init` 一进来先问一句
+- [x] 4.7 commit `feat(express): metaglens configure — local web config (approach B)`。
+- [x] 4.8 **配置入口引导(用户要求③)**:`cli.py` 的 `init` 一进来先问一句
   「在终端向导填 / 打开网页填」(默认终端,回车即选);选网页则走 Phase 4 的
   `configure` 服务。headless 无浏览器时自动回退到终端向导并提示。两条路径产出
   同一份 `metaglens.yaml`(对等)。commit `feat(cli): init offers shell-wizard or web config`。
@@ -267,3 +267,21 @@ OK
 - 只决策资源类参数，不碰科学参数。
 - 新增 4 项测试（内存压并发+理由含 OOM、乘积≤cores 全组合、充裕内存满并发、RAM 未知不压）。
 - 验证：`unittest` 77→**81** 全绿；`bash -n` 全模板 OK。
+
+### Phase 4 — Web 配置（commit `a223ce4` + `dab955c`）
+
+- 4.2 抽 `metaglens/_theme.py`（`REPORT_CSS` + `LENS_SVG`，即原 report._CSS/_LENS 逐字节搬移）；
+  `report.py` 改 `from ._theme import ...`。回归：报告输出经归一化时间戳后与重构前**逐字节一致**
+  （唯一差异是 datetime 时间戳），并有测试断言 `report._CSS is _theme.REPORT_CSS`。
+- 4.1/4.3/4.4 `express/webconfig.py`（stdlib `ThreadingHTTPServer`，绑 127.0.0.1、端口 0、
+  一次性 token，无 token → 403）；只读 API：`/api/hardware|plan|samples|db|required-dbs`；
+  `POST /save` 走同一 `Config.validate()`+`to_yaml`。请求逻辑抽成纯函数便于单测。
+- 4.2 页面：自包含 HTML，复用共享皮（`REPORT_CSS`+`LENS_SVG`），logo 读单一 b64 资产
+  （换资产即换 logo，代码不写死）；中英 `I18N` 内置，切语言只重渲染 UI。
+- 4.5/4.8 `cli.py`：新增 `configure` 命令（`--lang`/`--no-browser`）；`init` 先问
+  终端向导 / 网页（默认终端），网页路径调 `webconfig.serve`。终端向导保留。
+- 新增 10 项测试：save 与直接 `to_yaml` **逐字节一致**；zh/en 两次 POST **逐字节一致**（i18n 不污染）；
+  非法 payload 不写文件；四个 API；`build_page` 含 token/双语/皮；**活服务** 无 token→403 / 有 token→200 /
+  POST /save 写 yaml；且断言绑定地址为 `127.0.0.1`。
+- 验证：`unittest` 81→**91** 全绿；`bash -n` 全模板 OK；`py_compile cli.py` OK（本机无 typer，不 import 运行）。
+- 安全自查：绑 `127.0.0.1`（有测试断言）、无 token 403、不写 DB 目录、无网络请求。
