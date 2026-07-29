@@ -775,5 +775,43 @@ class TestDatabaseRegistry(TempDirCase):
         self.assertNotIn("gtdbtk", need)
 
 
+class TestParallelPlanner(unittest.TestCase):
+    """Phase 3: parallel-plan recommendation with rationale."""
+
+    def test_memory_caps_jobs_with_reason(self):
+        from metaglens.decide import planner
+        # 10 samples, 64 cores, but only 64 GB RAM at ~24 GB/job -> cap at 2.
+        plan = planner.recommend_parallel(cores=64, ram_gb=64, n_samples=10)
+        self.assertTrue(plan.memory_capped)
+        self.assertLess(plan.jobs, 10)
+        self.assertEqual(plan.jobs, 2)  # floor(64/24)
+        self.assertIn("OOM", plan.reason)
+
+    def test_jobs_times_threads_never_exceed_cores(self):
+        from metaglens.decide import planner
+        for cores in (1, 4, 16, 112):
+            for ram in (0, 8, 128, 512):
+                for n in (1, 3, 200):
+                    p = planner.recommend_parallel(cores, ram, n)
+                    self.assertLessEqual(p.jobs * p.threads_per_job, cores,
+                                         f"{cores}/{ram}/{n}")
+                    self.assertGreaterEqual(p.jobs, 1)
+                    self.assertGreaterEqual(p.threads_per_job, 1)
+
+    def test_ample_memory_uses_full_parallelism(self):
+        from metaglens.decide import planner
+        plan = planner.recommend_parallel(cores=112, ram_gb=498, n_samples=7)
+        self.assertFalse(plan.memory_capped)
+        self.assertEqual(plan.jobs, 7)
+        self.assertEqual(plan.threads_per_job, 112 // 7)
+
+    def test_unknown_ram_not_capped(self):
+        from metaglens.decide import planner
+        plan = planner.recommend_parallel(cores=32, ram_gb=0, n_samples=8)
+        self.assertFalse(plan.memory_capped)
+        self.assertEqual(plan.jobs, 8)
+        self.assertIn("RAM unknown", plan.reason)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
