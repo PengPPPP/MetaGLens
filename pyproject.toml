@@ -17,7 +17,13 @@ dependencies = ["PyYAML>=5.1", "typer>=0.9", "rich>=12.0"]
 metaglens = "metaglens.cli:main"
 
 [tool.setuptools]
-packages = ["metaglens"]
+packages = [
+    "metaglens",
+    "metaglens.sense",
+    "metaglens.decide",
+    "metaglens.express",
+    "metaglens.observe",
+]
 
 [tool.setuptools.package-data]
 metaglens = ["templates/*.sh", "templates/*.b64", "templates/*.md"]
