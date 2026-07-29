@@ -174,10 +174,10 @@ POST 回写 `metaglens.yaml`。
 
 ## Phase 5 — 文档
 
-- [ ] 5.1 `README.md`:新增 `metaglens configure` 用法 + 安全说明(127.0.0.1/token)+
+- [x] 5.1 `README.md`:新增 `metaglens configure` 用法 + 安全说明(127.0.0.1/token)+
   「无 GUI 时用终端向导或端口转发」。
-- [ ] 5.2 在本文件对应 Phase 打勾并写完成备注。
-- [ ] 5.3 通知 IDE 会话审查(git diff)。
+- [x] 5.2 在本文件对应 Phase 打勾并写完成备注。
+- [x] 5.3 通知 IDE 会话审查(git diff)。
 
 ---
 
@@ -192,14 +192,14 @@ POST 回写 `metaglens.yaml`。
 不依赖任何服务存活;运行结束/崩溃后仍可打开看最终态。
 
 **步骤**
-- [ ] 6.1 `observe/monitor.py`:从 `pipeline_status.json`(steps/started/finished/attempts)+
+- [x] 6.1 `observe/monitor.py`:从 `pipeline_status.json`(steps/started/finished/attempts)+
   当前阶段日志尾部 采集监控数据;纯 stdlib。
-- [ ] 6.2 `monitor.html` 渲染:**复用 Phase 4.2 抽出的共享视觉模块**(与交付报告
+- [x] 6.2 `monitor.html` 渲染:**复用 Phase 4.2 抽出的共享视觉模块**(与交付报告
   同一套皮),展示:阶段时间线/状态、当前阶段、已耗时、日志尾部;自包含、自刷新。
-- [ ] 6.3 `cli.py` 加 `monitor` 命令(旁路启动,不影响 run);与现有 `status`/§5.2 终端版共存。
-- [ ] 6.4 测试:给定一份 status.json + 日志,断言 monitor.html 含各阶段状态与日志尾;
+- [x] 6.3 `cli.py` 加 `monitor` 命令(旁路启动,不影响 run);与现有 `status`/§5.2 终端版共存。
+- [x] 6.4 测试:给定一份 status.json + 日志,断言 monitor.html 含各阶段状态与日志尾;
   阶段失败时页面能正确标红。
-- [ ] 6.5 `README` 补 `metaglens monitor` 用法。commit `feat(observe): live self-refreshing monitor.html`。
+- [x] 6.5 `README` 补 `metaglens monitor` 用法。commit `feat(observe): live self-refreshing monitor.html`。
 
 **依赖**:Phase 4.2 共享视觉模块(保证与交付报告风格一致)。
 
@@ -285,3 +285,21 @@ OK
   POST /save 写 yaml；且断言绑定地址为 `127.0.0.1`。
 - 验证：`unittest` 81→**91** 全绿；`bash -n` 全模板 OK；`py_compile cli.py` OK（本机无 typer，不 import 运行）。
 - 安全自查：绑 `127.0.0.1`（有测试断言）、无 token 403、不写 DB 目录、无网络请求。
+
+### Phase 6 — 监控页（commit `df40665`）
+
+- `observe/monitor.py`：`collect(results_dir)` 读 `pipeline_status.json`（steps/started/
+  finished/attempts + selected_steps 顺序）+ 当前阶段日志尾（`reports/logs/{step}.log`，glob 兜底）；
+  `render_html` 复用 `_theme`（同交付报告皮），`<meta http-equiv="refresh">` 自刷新，
+  状态色 completed/running/failed/pending；`write_monitor` 写 `results/monitor.html`。
+- `cli.py` 新增 `monitor`（`--interval`/`--once`，循环重写；旁路，不影响 run）。与 `status` 共存。
+- 新增 4 项测试：collect 选中 running 阶段+日志尾、render 含皮/refresh/各阶段/running 色、
+  failed 标红+last_failure 块、write_monitor 自包含。
+- 验证：`unittest` 91→**95** 全绿；`bash -n` 全模板 OK；`py_compile cli.py` OK。
+
+### Phase 5 — 文档（commit `<pending-docs>`）
+
+- `README.md`：Quick start 增 `configure`/`monitor`；新增「Web configuration」（127.0.0.1+token、
+  与向导产出一致、语言无关、headless 端口转发）与「Live monitor」（file:// 自刷新、崩溃后仍可看、旁路）两节。
+- 计划文档全部勾选框完成，各 Phase 完成备注齐全。
+- 5.3 待办：通知 IDE 会话审查 git diff（由汇报环节完成）。

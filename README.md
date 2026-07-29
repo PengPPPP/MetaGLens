@@ -32,12 +32,14 @@ the environments during setup.
 
 ```bash
 metaglens init                 # interactive wizard -> writes metaglens.yaml
+metaglens configure            # OR configure in a local web page (loopback + token)
 metaglens validate             # check config + dry-render every stage script
 metaglens run --dry-run        # render + bash -n, without executing
 metaglens run                  # materialize and execute the whole route
 metaglens run --from 04_binning  # run from a specific stage onward
 metaglens run --only 07_taxonomy # run only the named stage(s), comma-separated
 metaglens status               # show stage progress
+metaglens monitor              # write a self-refreshing monitor.html (open via file://)
 metaglens resume               # continue from the first incomplete stage
 metaglens report               # (re)build delivery/report.html
 metaglens methods              # print the generated Methods text
@@ -48,6 +50,47 @@ metaglens setup-env            # one-shot conda environment creation
 All commands accept `-c/--config PATH` (default `metaglens.yaml`).
 `--only` and `--from` steps are validated against the selected route, so a
 misspelled stage id fails fast instead of silently running nothing.
+
+## Web configuration (optional)
+
+If your server has a desktop/browser, `metaglens configure` opens a local web
+form as an alternative to the terminal wizard:
+
+```bash
+metaglens configure                 # opens a browser form
+metaglens configure --lang en       # English UI (default: zh)
+metaglens configure --no-browser    # headless: prints a URL to port-forward
+```
+
+The page checks hardware, recommends a parallel plan, discovers or validates
+database paths, and lists the samples it finds — then writes `metaglens.yaml`.
+
+- **Loopback only.** The service binds `127.0.0.1` on an OS-assigned port and
+  every request requires a one-time token embedded in the printed URL. It is
+  never exposed on a routable interface. Assumed single-user.
+- **Same config as the wizard.** The form writes YAML through the same
+  `Config.validate()` the terminal wizard uses, so both entry points produce
+  identical files. The UI language does not affect the produced YAML.
+- **No GUI?** Run with `--no-browser`, forward the printed port
+  (`ssh -L 8000:127.0.0.1:<port> user@host`), and open the URL locally — or just
+  use `metaglens init` in the terminal.
+
+## Live monitor (optional)
+
+`metaglens monitor` writes a self-contained, self-refreshing `monitor.html` into
+the results directory. Open it with `file://` — no server required:
+
+```bash
+metaglens monitor                   # rewrite every 5s until Ctrl-C
+metaglens monitor --interval 10     # refresh every 10s
+metaglens monitor --once            # write a single snapshot and exit
+```
+
+It shows the stage timeline, the current stage, and the tail of that stage's
+log, and it keeps working after the run finishes or crashes (the file always
+reflects the last written state). It is a side-car that reads
+`pipeline_status.json` and logs only — it never affects the run. The terminal
+`metaglens status` view remains available.
 
 ## One-shot conda environment setup
 
