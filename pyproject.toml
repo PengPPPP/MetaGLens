@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metaglens"
+version = "1.0.0"
+description = "Reproducible shotgun-metagenomics pipeline orchestrator: raw reads to MAGs, taxonomy, annotation, and a self-contained delivery report."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "PengPPPP", email = "chenghp0509@163.com" }]
+keywords = ["metagenomics", "MAG", "bioinformatics", "pipeline", "shotgun", "assembly", "binning"]
+dependencies = ["PyYAML>=5.1", "typer>=0.9", "rich>=12.0"]
+
+[project.scripts]
+metaglens = "metaglens.cli:main"
+
+[tool.setuptools]
+packages = ["metaglens"]
+
+[tool.setuptools.package-data]
+metaglens = ["templates/*.sh", "templates/*.b64", "templates/*.md"]
