@@ -180,7 +180,7 @@ POST 回写 `metaglens.yaml`。
 **目标**:运行过程中用户随时能打开一个 HTML 看到全部进展。终端可视功能(§5.2 +
 `metaglens status`)**保留**,HTML 是加法。
 
-**选型(用户已定向方案 S,待最终确认)**:不起服务。由一个 `metaglens monitor`
+**选型(用户已确认:方案 S)**:不起服务。由一个 `metaglens monitor`
 旁路进程(或运行本身)每几秒读 `pipeline_status.json` + `reports/logs/*` 重写
 `results/monitor.html`;页面靠 `<meta http-equiv="refresh">` 自刷新。用户 `file://` 直接开,
 不依赖任何服务存活;运行结束/崩溃后仍可打开看最终态。
@@ -199,10 +199,10 @@ POST 回写 `metaglens.yaml`。
 
 ---
 
-## 待用户确认的点
+## 已定决策
 
-- **Phase 6 选型**:已写方案 S(自刷新静态页,无服务)。若你要实时日志 tail、
-  不能接受整页刷新,才改成服务版(方案 W)。
+- **Phase 6 选型 = 方案 S**(自刷新静态页,无服务)——用户 2026-07-30 确认。
+  理由:“运行中随时能开、跨会话/崩溃后仍能看”不依赖服务存活;复用交付报告同一套皮。
 
 ---
 
