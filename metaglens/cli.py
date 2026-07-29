@@ -157,15 +157,62 @@ def init(
         cfg.to_yaml(config)
         _success(f"Template config written to {config}.")
         console.print("[dim]Edit it before running.[/dim]")
-    else:
-        from metaglens.wizard import run_wizard
-        cfg = run_wizard(console)
-        cfg.to_yaml(config)
-        _success(f"Configuration written to {config}.")
+        return
+
+    # Offer terminal wizard (default) or the local web config page. Both write
+    # the same metaglens.yaml through Config.validate(), so the choice is only
+    # about the entry surface.
+    use_web = False
+    if _is_interactive():
+        console.print("\n ? How would you like to configure this project?")
+        console.print("   [1] Terminal wizard (default)")
+        console.print("   [2] Web page (opens a local browser form)")
+        choice = typer.prompt("\n >", default="1")
+        use_web = str(choice).strip() == "2"
+
+    if use_web:
+        from metaglens.express import webconfig
         console.print(
-            f"\nNext: [cyan]metaglens validate -c {config}[/cyan], "
-            f"then [cyan]metaglens run -c {config}[/cyan]."
+            "\n[cyan]Starting the local web config...[/cyan] "
+            "(loopback only; a one-time token is in the URL)."
         )
+        console.print("[dim]No GUI? Port-forward the printed URL. Ctrl-C when done.[/dim]")
+        webconfig.serve(config_path=config, open_browser=True)
+        if Path(config).is_file():
+            _success(f"Configuration saved to {config}.")
+        return
+
+    from metaglens.wizard import run_wizard
+    cfg = run_wizard(console)
+    cfg.to_yaml(config)
+    _success(f"Configuration written to {config}.")
+    console.print(
+        f"\nNext: [cyan]metaglens validate -c {config}[/cyan], "
+        f"then [cyan]metaglens run -c {config}[/cyan]."
+    )
+
+
+# ─── configure ─────────────────────────────────────────────────────────────
+@app.command()
+def configure(
+    config: str = ConfigOpt,
+    lang: str = typer.Option("zh", "--lang", help="UI language: zh or en."),
+    no_browser: bool = typer.Option(False, "--no-browser",
+                                     help="Do not auto-open a browser (headless)."),
+) -> None:
+    """Configure the project in a local web page (loopback + one-time token)."""
+    print_banner()
+    _section("Web configuration")
+    from metaglens.express import webconfig
+    console.print(
+        "[cyan]Starting local config server...[/cyan] "
+        "bound to 127.0.0.1 with a one-time token."
+    )
+    if no_browser:
+        console.print("[dim]--no-browser: port-forward the printed URL, then open it.[/dim]")
+    webconfig.serve(config_path=config, lang=lang, open_browser=not no_browser)
+    if Path(config).is_file():
+        _success(f"Configuration available at {config}.")
 
 
 # ─── validate ────────────────────────────────────────────────────────────────
