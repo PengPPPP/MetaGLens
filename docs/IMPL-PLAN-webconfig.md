@@ -95,20 +95,20 @@ POST 回写 `metaglens.yaml`。
 **目标**:用户填 DB 路径能当场校验;没填能先扫系统;真没有才给下载指引。
 
 **步骤**
-- [ ] 2.1 新建 `metaglens/sense/database.py`,定义 registry(每库):`env_var`、
+- [x] 2.1 新建 `metaglens/sense/database.py`,定义 registry(每库):`env_var`、
   `sentinel`(判定该目录确为此库的标志文件,如 gtdbtk 的 `taxonomy/gtdb_taxonomy.tsv`)、
   `version_file`(如 gtdbtk 的 `metadata/metadata.txt` 里 `VERSION_DATA=`)、
   `size_hint_gb`、`download_hint`(命令或 URL 文本,不触发实际下载)。
   覆盖:checkm2 / gtdbtk / kraken2 / eggnog。
-- [ ] 2.2 `discover(name, cfg) -> DbStatus`:解析优先级 **CLI/config 显式路径 → 环境变量
+- [x] 2.2 `discover(name, cfg) -> DbStatus`:解析优先级 **CLI/config 显式路径 → 环境变量
   → 文件系统扫描(`~`、`/shared*`、`/opt*`、`{db_dir}` 下的候选目录名)→ 默认位置**;
   对命中的目录跑 sentinel 校验并回读版本。区分三态:已就位/路径写错(目录在但非此库)/未找到。
-- [ ] 2.3 `validate(name, path) -> (ok, detail)`:仅 sentinel + 版本,**只读**,不写 DB 目录。
-- [ ] 2.4 `required_databases(cfg) -> {name: reason}`:按 route + 配置开关(taxonomy_tool /
+- [x] 2.3 `validate(name, path) -> (ok, detail)`:仅 sentinel + 版本,**只读**,不写 DB 目录。
+- [x] 2.4 `required_databases(cfg) -> {name: reason}`:按 route + 配置开关(taxonomy_tool /
   contig_taxonomy / use_eggnog 等)推出**本次真正需要**的库;用不到的不报缺失(设计稿 §4.1)。
   **这是共用底座**(doctor/plan/web 都要),务必先做对。
-- [ ] 2.5 测试:mock 文件系统,覆盖三态 + required_databases 随配置变化。
-- [ ] 2.6 commit `feat(sense): database registry, discovery, validation`。
+- [x] 2.5 测试:mock 文件系统,覆盖三态 + required_databases 随配置变化。
+- [x] 2.6 commit `feat(sense): database registry, discovery, validation`。
 
 **验证**:本机 `~/gtdbtk_data/release232` 应被"文件系统扫描"发现(94G,环境变量未设);
 版本应读 `metadata/metadata.txt` 的 `VERSION_DATA=r232`,不靠猜目录名。
@@ -246,3 +246,15 @@ OK
 - 新增 4 项测试（真实 probe、meminfo 解析、mock disk_usage、psutil 缺失仍完整）。
 - 验证：`unittest` 65→**69** 全绿；`bash -n` 全模板 OK；本机实测
   `112 cores / 498 GB RAM / 796 GB free`（cores 与基线一致；RAM 以本机 MemTotal 实测为准）。
+
+### Phase 2 — `sense/database.py`（commit `51f52d1`）
+
+- `REGISTRY`（checkm2/gtdbtk/kraken2/eggnog）：`env_var`/`sentinel`/`version_file`/
+  `default_subdir`/`size_hint_gb`/`download_hint`/`scan_names`，与 `render._db` 的默认子目录对齐。
+- `discover(name, cfg, scan_roots=None)`：显式 config 路径 → 环境变量 → 文件系统扫描
+  （glob，非 os.walk，有界）→ 默认位置；三态 `ready/wrong_path/missing`，回读版本。
+- `validate(name, path)`：只读 sentinel + 版本；`required_databases(cfg)` 按 route+开关推导，
+  不报当前路线用不到的库。
+- 新增 8 项测试（scan/env/wrong_path/missing/validate/三种 required 组合）。
+- 验证：`unittest` 69→**77** 全绿；`bash -n` 全模板 OK；本机实测 `discover('gtdbtk')`
+  →`ready scan r232 /home/h1020/gtdbtk_data/release232`（环境变量未设，纯靠文件系统扫描命中，版本读自 metadata）。
