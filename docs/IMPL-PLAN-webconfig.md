@@ -4,8 +4,14 @@
 > - 规划/审查:IDE 会话(PengPPPP 本人对话的这个)
 > - 实现:tmux `metaglens_qoder` 会话(持续在线)
 > - 每完成一个 Phase,实现方在对应勾选框打勾并追加「完成备注」,然后 **git commit**。
-> - 实现方负责 `metaglens/`、`tests/`、`README.md`;`docs/WORKLOG.md` 仍归 IDE 会话。
+> - 实现方负责 `metaglens/`、`tests/`、`README.md`;`docs/WORKLOG.md` 归 IDE 会话。
 > - 设计依据:`DESIGN-intelligence-and-ux.md`;施工历史:`WORKLOG.md`。
+>
+> **运行模式(2026-07-30 用户授权)**:用户休息期间,实现方**连续执行 Phase 1→Phase 6**,
+> **无需逐阶段等待人工审查**。但每个 Phase 仍须自证门禁通过才能 commit:
+> `python3 -m unittest discover -s tests -t .` 全绿 + `bash -n` 过全模板 + 遵守铁律。
+> **若某 Phase 无法通过验证、或遇到需用户拍板的歧义(尤其科学参数/安全取舍),停下来在完成备注
+> 写明阻塞原因,不要提交碎代码、也不要猜着往下做。** 全部做完后停下汇报总清单(各 Phase commit 哈希)。
 
 ---
 
