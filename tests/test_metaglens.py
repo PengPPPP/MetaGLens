@@ -638,5 +638,48 @@ class TestContigCommunityValidation(TempDirCase):
         self.assertEqual(cfg.validate(), [])
 
 
+class TestHardwareProbe(unittest.TestCase):
+    """Phase 1: stdlib hardware probing with graceful fallbacks."""
+
+    def _meminfo(self, kb: int) -> str:
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        p = d / "meminfo"
+        p.write_text(f"MemTotal:       {kb} kB\nMemFree:  123 kB\n", encoding="utf-8")
+        return str(p)
+
+    def test_probe_returns_populated_info(self):
+        from metaglens.sense import hardware
+        info = hardware.probe(path=".")
+        self.assertGreaterEqual(info.cores, 1)
+        self.assertGreater(info.ram_gb, 0.0)
+        self.assertIsInstance(info.in_container, bool)
+
+    def test_ram_read_from_meminfo(self):
+        from metaglens.sense import hardware
+        # 2 GiB expressed in kB.
+        info = hardware.probe(path=".", meminfo_path=self._meminfo(2 * 1024 * 1024))
+        self.assertAlmostEqual(info.ram_gb, 2.0, places=3)
+
+    def test_disk_free_uses_disk_usage(self):
+        from metaglens.sense import hardware
+        Usage = __import__("collections").namedtuple("Usage", "total used free")
+        with unittest.mock.patch(
+            "metaglens.sense.hardware.shutil.disk_usage",
+            return_value=Usage(0, 0, 5 * 1024 ** 3),
+        ):
+            info = hardware.probe(path=".", meminfo_path=self._meminfo(1024 * 1024))
+        self.assertAlmostEqual(info.disk_free_gb, 5.0, places=3)
+
+    def test_result_complete_without_psutil(self):
+        from metaglens.sense import hardware
+        # Force the psutil fallback path to be a no-op and ensure stdlib meminfo
+        # still yields a usable figure.
+        with unittest.mock.patch.object(hardware, "_psutil_ram_gb", return_value=0.0):
+            info = hardware.probe(path=".", meminfo_path=self._meminfo(4 * 1024 * 1024))
+        self.assertAlmostEqual(info.ram_gb, 4.0, places=3)
+        self.assertGreaterEqual(info.cores, 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
