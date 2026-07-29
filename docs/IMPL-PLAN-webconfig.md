@@ -77,14 +77,14 @@ POST 回写 `metaglens.yaml`。
 **目标**:回答"这机器几核、多少内存、多少可用磁盘"。
 
 **步骤**
-- [ ] 1.1 新建 `metaglens/sense/__init__.py`、`metaglens/sense/hardware.py`。
-- [ ] 1.2 `probe() -> HardwareInfo(cores, ram_gb, disk_free_gb, in_container)`:
+- [x] 1.1 新建 `metaglens/sense/__init__.py`、`metaglens/sense/hardware.py`。
+- [x] 1.2 `probe() -> HardwareInfo(cores, ram_gb, disk_free_gb, in_container)`:
   - cores: `os.cpu_count()`;
   - ram_gb: 优先读 `/proc/meminfo` MemTotal,失败退 `os.sysconf`;
   - disk_free_gb: `shutil.disk_usage(path)`;
   - psutil 若可用可作交叉校验,但**不得**作为硬依赖(`try: import psutil except: None`)。
-- [ ] 1.3 测试:mock `/proc/meminfo` 与 `shutil.disk_usage`;断言 psutil 缺失时仍返回结果。
-- [ ] 1.4 commit `feat(sense): hardware probing with stdlib fallback`。
+- [x] 1.3 测试:mock `/proc/meminfo` 与 `shutil.disk_usage`;断言 psutil 缺失时仍返回结果。
+- [x] 1.4 commit `feat(sense): hardware probing with stdlib fallback`。
 
 **验证**:本机应报 ~112 核 / ~1081G RAM / 数百 G 空闲(实测基线,供对照)。
 
@@ -236,3 +236,13 @@ $ python3 -m unittest discover -s tests -t .
 Ran 65 tests in 0.849s
 OK
 ```
+
+### Phase 1 — `sense/hardware.py`（commit `6741141`）
+
+- 新建 `metaglens/sense/`（`__init__.py` 导出 `HardwareInfo` / `probe`；`hardware.py`）。
+- `probe(path, meminfo_path)`：cores=`os.cpu_count()`；ram 优先 `/proc/meminfo` MemTotal，
+  退 `os.sysconf(SC_PAGE_SIZE*SC_PHYS_PAGES)`，再退可选 psutil；disk=`shutil.disk_usage`；
+  `in_container` 查 `/.dockerenv` 与 `/proc/1/cgroup`。纯 stdlib，psutil 仅 try-import 兜底。
+- 新增 4 项测试（真实 probe、meminfo 解析、mock disk_usage、psutil 缺失仍完整）。
+- 验证：`unittest` 65→**69** 全绿；`bash -n` 全模板 OK；本机实测
+  `112 cores / 498 GB RAM / 796 GB free`（cores 与基线一致；RAM 以本机 MemTotal 实测为准）。
