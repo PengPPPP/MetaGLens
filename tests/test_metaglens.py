@@ -681,5 +681,99 @@ class TestHardwareProbe(unittest.TestCase):
         self.assertGreaterEqual(info.cores, 1)
 
 
+class TestDatabaseRegistry(TempDirCase):
+    """Phase 2: database registry, discovery, validation, requirement derivation."""
+
+    _DB_ENV = ("GTDBTK_DATA_PATH", "CHECKM2DB", "KRAKEN2_DB_PATH", "EGGNOG_DATA_DIR")
+
+    def _fake_gtdbtk(self, version="r232") -> Path:
+        root = self.tmp / "gtdbtk_data" / f"release{version.lstrip('r')}"
+        (root / "taxonomy").mkdir(parents=True)
+        (root / "taxonomy" / "gtdb_taxonomy.tsv").write_text("x\n", encoding="utf-8")
+        (root / "metadata").mkdir(parents=True)
+        (root / "metadata" / "metadata.txt").write_text(
+            f"VERSION_DATA={version}\n", encoding="utf-8")
+        return root
+
+    def _clear_db_env(self):
+        patcher = unittest.mock.patch.dict("os.environ",
+                                           {k: "" for k in self._DB_ENV}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_discover_gtdbtk_via_filesystem_scan(self):
+        from metaglens.sense import database as db
+        self._clear_db_env()
+        self._fake_gtdbtk("r232")
+        cfg = self.make_cfg()  # taxonomy_tool=gtdbtk default, taxonomy_db=""
+        st = db.discover("gtdbtk", cfg, scan_roots=[self.tmp])
+        self.assertEqual(st.state, "ready", st.detail)
+        self.assertEqual(st.source, "scan")
+        self.assertEqual(st.version, "r232")
+        self.assertTrue(st.path.endswith("release232"), st.path)
+
+    def test_discover_env_var(self):
+        from metaglens.sense import database as db
+        root = self._fake_gtdbtk("r220")
+        cfg = self.make_cfg()
+        with unittest.mock.patch.dict("os.environ",
+                                      {"GTDBTK_DATA_PATH": str(root)}, clear=False):
+            st = db.discover("gtdbtk", cfg, scan_roots=[self.tmp])
+        self.assertEqual(st.state, "ready")
+        self.assertEqual(st.source, "env")
+        self.assertEqual(st.version, "r220")
+
+    def test_discover_wrong_path(self):
+        from metaglens.sense import database as db
+        self._clear_db_env()
+        bogus = self.tmp / "not_a_db"
+        bogus.mkdir()
+        cfg = self.make_cfg(checkm2_db=str(bogus))
+        st = db.discover("checkm2", cfg, scan_roots=[self.tmp])
+        self.assertEqual(st.state, "wrong_path")
+        self.assertIn("does not look like", st.detail)
+
+    def test_discover_missing_gives_download_hint(self):
+        from metaglens.sense import database as db
+        self._clear_db_env()
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        cfg = self.make_cfg()
+        st = db.discover("eggnog", cfg, scan_roots=[empty])
+        self.assertEqual(st.state, "missing")
+        self.assertIn("download_eggnog_data.py", st.detail)
+
+    def test_validate_direct(self):
+        from metaglens.sense import database as db
+        root = self._fake_gtdbtk("r214")
+        ok, detail = db.validate("gtdbtk", str(root))
+        self.assertTrue(ok, detail)
+        self.assertIn("r214", detail)
+        bad_ok, _ = db.validate("gtdbtk", str(self.tmp))
+        self.assertFalse(bad_ok)
+
+    def test_required_databases_mag_default(self):
+        from metaglens.sense import database as db
+        cfg = self.make_cfg(route_name="mag_per_sample")  # gtdbtk + eggnog default
+        need = db.required_databases(cfg)
+        self.assertEqual(set(need), {"checkm2", "gtdbtk", "eggnog"})
+
+    def test_required_databases_kraken_taxonomy(self):
+        from metaglens.sense import database as db
+        cfg = self.make_cfg(route_name="mag_per_sample", taxonomy_tool="kraken2")
+        need = db.required_databases(cfg)
+        self.assertIn("kraken2", need)
+        self.assertNotIn("gtdbtk", need)
+
+    def test_required_databases_contig(self):
+        from metaglens.sense import database as db
+        cfg = self.make_cfg(route_name="contig_based", contig_taxonomy="kraken2")
+        need = db.required_databases(cfg)
+        self.assertIn("kraken2", need)
+        self.assertIn("eggnog", need)
+        self.assertNotIn("checkm2", need)
+        self.assertNotIn("gtdbtk", need)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

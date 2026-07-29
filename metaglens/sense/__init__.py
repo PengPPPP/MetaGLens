@@ -9,5 +9,22 @@ bare interpreter.
 from __future__ import annotations
 
 from .hardware import HardwareInfo, probe
+from .database import (
+    DbSpec,
+    DbStatus,
+    REGISTRY,
+    discover,
+    required_databases,
+    validate,
+)
 
-__all__ = ["HardwareInfo", "probe"]
+__all__ = [
+    "HardwareInfo",
+    "probe",
+    "DbSpec",
+    "DbStatus",
+    "REGISTRY",
+    "discover",
+    "required_databases",
+    "validate",
+]
