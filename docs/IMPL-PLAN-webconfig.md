@@ -157,6 +157,10 @@ POST 回写 `metaglens.yaml`。
   **另加**:切换语言后 POST 同样输入,产出的 yaml **逐字节一致**(证明 i18n 不污染配置);
   抽出共享主题后 `report.py` 重建报告的回归测试仍绿。
 - [ ] 4.7 commit `feat(express): metaglens configure — local web config (approach B)`。
+- [ ] 4.8 **配置入口引导(用户要求③)**:`cli.py` 的 `init` 一进来先问一句
+  「在终端向导填 / 打开网页填」(默认终端,回车即选);选网页则走 Phase 4 的
+  `configure` 服务。headless 无浏览器时自动回退到终端向导并提示。两条路径产出
+  同一份 `metaglens.yaml`(对等)。commit `feat(cli): init offers shell-wizard or web config`。
 
 **安全自查**:确认未绑 `0.0.0.0`;无 token 请求返回 403;不写 DB 目录;不发起网络请求。
 
@@ -171,11 +175,42 @@ POST 回写 `metaglens.yaml`。
 
 ---
 
+## Phase 6 — 实时运行状态 HTML(用户要求①,方案 S:自刷新静态页)
+
+**目标**:运行过程中用户随时能打开一个 HTML 看到全部进展。终端可视功能(§5.2 +
+`metaglens status`)**保留**,HTML 是加法。
+
+**选型(用户已定向方案 S,待最终确认)**:不起服务。由一个 `metaglens monitor`
+旁路进程(或运行本身)每几秒读 `pipeline_status.json` + `reports/logs/*` 重写
+`results/monitor.html`;页面靠 `<meta http-equiv="refresh">` 自刷新。用户 `file://` 直接开,
+不依赖任何服务存活;运行结束/崩溃后仍可打开看最终态。
+
+**步骤**
+- [ ] 6.1 `observe/monitor.py`:从 `pipeline_status.json`(steps/started/finished/attempts)+
+  当前阶段日志尾部 采集监控数据;纯 stdlib。
+- [ ] 6.2 `monitor.html` 渲染:**复用 Phase 4.2 抽出的共享视觉模块**(与交付报告
+  同一套皮),展示:阶段时间线/状态、当前阶段、已耗时、日志尾部;自包含、自刷新。
+- [ ] 6.3 `cli.py` 加 `monitor` 命令(旁路启动,不影响 run);与现有 `status`/§5.2 终端版共存。
+- [ ] 6.4 测试:给定一份 status.json + 日志,断言 monitor.html 含各阶段状态与日志尾;
+  阶段失败时页面能正确标红。
+- [ ] 6.5 `README` 补 `metaglens monitor` 用法。commit `feat(observe): live self-refreshing monitor.html`。
+
+**依赖**:Phase 4.2 共享视觉模块(保证与交付报告风格一致)。
+
+---
+
+## 待用户确认的点
+
+- **Phase 6 选型**:已写方案 S(自刷新静态页,无服务)。若你要实时日志 tail、
+  不能接受整页刷新,才改成服务版(方案 W)。
+
+---
+
 ## 完成备注(实现方在此追加)
 
 <!-- 例:Phase 0 完成于 <commit>，验证输出：... -->
 
-### Phase 0 — §7-8 收尾（commit `<pending>`）
+### Phase 0 — §7-8 收尾（commit `27304f4`）
 
 - 0.1 `10_community_summary.sh:67` `GTDB_SUMMARIES` 改真 glob
   `("${TAX_DIR}/gtdbtk/"*.summary.tsv)`；下游 python 仍按具体文件名 isfile 打开，安全。
