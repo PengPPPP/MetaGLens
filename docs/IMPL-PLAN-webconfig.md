@@ -1,0 +1,176 @@
+# 实施计划：Web 配置(方案 B)及其后端
+
+> 本文件是**跨会话协调基准**。
+> - 规划/审查:IDE 会话(PengPPPP 本人对话的这个)
+> - 实现:tmux `metaglens_qoder` 会话(持续在线)
+> - 每完成一个 Phase,实现方在对应勾选框打勾并追加「完成备注」,然后 **git commit**。
+> - 实现方负责 `metaglens/`、`tests/`、`README.md`;`docs/WORKLOG.md` 仍归 IDE 会话。
+> - 设计依据:`DESIGN-intelligence-and-ux.md`;施工历史:`WORKLOG.md`。
+
+---
+
+## 0. 目标与总原则
+
+**用户目标**:课题组服务器常有 Linux 可视化 + 内置浏览器。让新手在**网页**里完成配置
+(线程/任务、要做什么、数据库路径),数据库缺失时告知去哪下载。选型已定:**方案 B
+(本地小服务)**——`metaglens configure` 起一个本地 HTTP 服务、自动开浏览器、填完
+POST 回写 `metaglens.yaml`。
+
+**为什么 B 依赖后端**:用户要的不是"填空表单",而是"会检查会建议的助手"——
+配线程要有硬件推荐、填 DB 路径要当场校验、缺失要先扫描确认再给下载指引。这些是
+**后端能力**(感知层),网页只是它的入口。所以顺序 = 先造后端,再套网页壳。
+
+**贯穿原则(违反即回退)**:
+1. **离线优先**:全部功能在断网、无 API Key 下可用。新增重依赖一律禁止;
+   `psutil` 只能作**可选增强**,缺失时用 stdlib(`os.cpu_count`、`shutil.disk_usage`、
+   `/proc/meminfo`)兜底。Web 服务只用标准库 `http.server`,**不引入 Flask/FastAPI**。
+2. **配置对等**(设计原则 7):网页产出的 `metaglens.yaml` 必须与终端向导**完全一致**,
+   两者复用同一个 `Config` 及其 `validate()`。终端向导**保留**为无 GUI 服务器的兜底。
+3. **共享服务器安全**:Web 服务绑 `127.0.0.1` + 一次性 token;假定单用户,文档写明。
+4. **复用现有**:`samples.discover()`、`Config`、`conda_env`(已修)、`routes`,不要重造。
+5. **科学参数不自动改**:推荐只给资源类(线程/并发)与路径,绝不改 `min_contig_len` 等。
+6. 每个 Phase 独立 commit;`python3 -m unittest discover -s tests -t .` 必须保持全绿。
+7. **视觉对齐(用户明确要求)**:Web 配置页的整体风格/版式必须与 **skill 版报告**和
+   **现有 `report.py` 报告**完全一致——同一套蓝色 poster 主题、六边形透镜背景、
+   Times New Roman;**唯一变量是 logo**。为防两处 HTML 日后漂移,须把共用视觉
+   (CSS 调色板 + 透镜 SVG)**抽成一个共享模块**,由 `report.py` 与 `webconfig.py` 共同
+   import(见 Phase 4.2)。
+8. **交互层可中英切换(用户明确要求)**:配置页提供中/英语言选项(设计原则 8 + §5.3)。
+   注意边界:**只切 UI 文案,产出的 `metaglens.yaml` 与语言无关**;交付物(report/methods)
+   仍英文,故共享模块只放"视觉",不放"文案"。
+
+**测试环境注意**:本机无 `typer`/`rich`,所以 CLI 层不能在 unittest 里直接 import;
+沿用现有做法——核心逻辑放无第三方依赖的模块,测试只 import 这些模块。
+
+---
+
+## Phase 0 — 收尾 §7-8(P0 遗留,独立,最先做)
+
+**动机**:`10_community_summary.sh` 的 `GTDB_SUMMARIES` 是字面量数组,`nullglob` 不生效,
+计数恒为 2 → `contig_based` 路线交付物是坏的。详见 `WORKLOG.md §6.2`。
+
+**步骤**
+- [ ] 0.1 `10_community_summary.sh:67`:把 `GTDB_SUMMARIES` 改成真 glob。
+  参考同文件 `06_dereplication.sh` 的多行 glob 写法:
+  `GTDB_SUMMARIES=("${TAX_DIR}/gtdbtk/"*.summary.tsv)`(或分别列 bac120/ar53 的 glob 模式)。
+- [ ] 0.2 同文件 `:297` 附近:`NUM_TAXA==0` 时**拒绝**标 completed,报错退出并提示
+  「该来源产出空表,检查上游」。这是设计稿 §4.4「产物验证」的落地。
+- [ ] 0.3 `config.py` / `validate()`:当 `analysis_basis` 推出为 contig(或 route 含
+  `09_contig`)且 `selected_steps` 含 `10_community`、而 `contig_taxonomy==none` 时,
+  给出**明确错误**:「contig 路线要产出群落表需 contig_taxonomy=kraken2(需 kraken2 库)」。
+  这是 §4.3「跑之前拦住」。**不要**把默认改成 kraken2(会静默引入 DB 依赖)。
+- [ ] 0.4 回归测试:`tests/` 加用例——字面量 vs 真 glob 计数差异、空表被拦、上述 validate 报错。
+- [ ] 0.5 `bash -n` 全模板 + unittest 全绿 → commit `fix: section 7-8 community-source nullglob & empty-matrix guard`。
+
+**验证**:构造一个"无 gtdbtk 输出"的目录,确认 SOURCE 不再误判 gtdbtk;contig 默认配置被 validate 拦住。
+
+---
+
+## Phase 1 — `sense/hardware.py`(硬件感知)
+
+**目标**:回答"这机器几核、多少内存、多少可用磁盘"。
+
+**步骤**
+- [ ] 1.1 新建 `metaglens/sense/__init__.py`、`metaglens/sense/hardware.py`。
+- [ ] 1.2 `probe() -> HardwareInfo(cores, ram_gb, disk_free_gb, in_container)`:
+  - cores: `os.cpu_count()`;
+  - ram_gb: 优先读 `/proc/meminfo` MemTotal,失败退 `os.sysconf`;
+  - disk_free_gb: `shutil.disk_usage(path)`;
+  - psutil 若可用可作交叉校验,但**不得**作为硬依赖(`try: import psutil except: None`)。
+- [ ] 1.3 测试:mock `/proc/meminfo` 与 `shutil.disk_usage`;断言 psutil 缺失时仍返回结果。
+- [ ] 1.4 commit `feat(sense): hardware probing with stdlib fallback`。
+
+**验证**:本机应报 ~112 核 / ~1081G RAM / 数百 G 空闲(实测基线,供对照)。
+
+---
+
+## Phase 2 — `sense/database.py`(数据库注册表 + 发现 + 校验)
+
+**目标**:用户填 DB 路径能当场校验;没填能先扫系统;真没有才给下载指引。
+
+**步骤**
+- [ ] 2.1 新建 `metaglens/sense/database.py`,定义 registry(每库):`env_var`、
+  `sentinel`(判定该目录确为此库的标志文件,如 gtdbtk 的 `taxonomy/gtdb_taxonomy.tsv`)、
+  `version_file`(如 gtdbtk 的 `metadata/metadata.txt` 里 `VERSION_DATA=`)、
+  `size_hint_gb`、`download_hint`(命令或 URL 文本,不触发实际下载)。
+  覆盖:checkm2 / gtdbtk / kraken2 / eggnog。
+- [ ] 2.2 `discover(name, cfg) -> DbStatus`:解析优先级 **CLI/config 显式路径 → 环境变量
+  → 文件系统扫描(`~`、`/shared*`、`/opt*`、`{db_dir}` 下的候选目录名)→ 默认位置**;
+  对命中的目录跑 sentinel 校验并回读版本。区分三态:已就位/路径写错(目录在但非此库)/未找到。
+- [ ] 2.3 `validate(name, path) -> (ok, detail)`:仅 sentinel + 版本,**只读**,不写 DB 目录。
+- [ ] 2.4 `required_databases(cfg) -> {name: reason}`:按 route + 配置开关(taxonomy_tool /
+  contig_taxonomy / use_eggnog 等)推出**本次真正需要**的库;用不到的不报缺失(设计稿 §4.1)。
+  **这是共用底座**(doctor/plan/web 都要),务必先做对。
+- [ ] 2.5 测试:mock 文件系统,覆盖三态 + required_databases 随配置变化。
+- [ ] 2.6 commit `feat(sense): database registry, discovery, validation`。
+
+**验证**:本机 `~/gtdbtk_data/release232` 应被"文件系统扫描"发现(94G,环境变量未设);
+版本应读 `metadata/metadata.txt` 的 `VERSION_DATA=r232`,不靠猜目录名。
+
+---
+
+## Phase 3 — `decide/planner.py`(并行方案推荐)
+
+**目标**:给出 `parallel_jobs × threads_per_job` 推荐 + **理由**(设计原则:解释权高于自动化)。
+
+**步骤**
+- [ ] 3.1 新建 `metaglens/decide/__init__.py`、`metaglens/decide/planner.py`。
+- [ ] 3.2 `recommend_parallel(cores, ram_gb, n_samples) -> Plan(jobs, threads_per_job, reason)`:
+  以现有 `render.build_global_values` 里的推导为基线,补上"单样本峰值内存 × 并发 ≤ 总内存"
+  这一约束(内存系数放模块常量,标注为粗估),输出人话理由。
+- [ ] 3.3 测试:小内存/多样本场景应压低并发并给出理由;`jobs*threads ≤ cores`。
+- [ ] 3.4 commit `feat(decide): parallel plan recommendation with rationale`。
+
+---
+
+## Phase 4 — `express/webconfig.py` + `metaglens configure`(方案 B 本体)
+
+**目标**:本地网页配置,实时调用 Phase 1–3 的能力。
+
+**步骤**
+- [ ] 4.1 新建 `metaglens/express/__init__.py`、`metaglens/express/webconfig.py`,
+  基于 stdlib `http.server.ThreadingHTTPServer`。绑 `127.0.0.1`、端口用 `0`(系统分配),
+  生成一次性 token,URL 带 `?token=`;所有请求校验 token,否则 403。
+- [ ] 4.2 **先抽共享视觉模块**(防漂移):把 `report.py` 里的 `_CSS` 调色板与 `_LENS`
+  透镜 SVG 抽到 `metaglens/express/theme.py`(或 `metaglens/_theme.py`),`report.py` 改为
+  import 它、行为不变(**回归:重建一次报告,`window.__MG__` 数据与关键 DOM 不变**)。
+  然后 `GET /`:返回**自包含 HTML**表单,复用该共享主题(内嵌、不引外部资源),
+  分组同终端向导五组。
+  - **logo 可替换**:页面 logo 读单一 b64 资产,默认 `report_logo.b64`;若要用软件专属
+    logo,把 `MetaGLens-software专属版.png` 转 b64 放同名位置即可,**代码不写死**。
+    (用户只要求"替换 logo",其余视觉一律照搬,不得改动。)
+  - **语言切换**:页面顶部放 中文/English 切换;所有 label 与帮助文案**双语内置**
+    (建议 JS 里存 `I18N = {zh:{...}, en:{...}}`,切换即重渲染,无需刷新)。
+    默认语言:CLI `--lang` > `Accept-Language` > 中文。**切语言不影响任何将写入 yaml 的值。**
+- [ ] 4.3 只读 JSON 接口(供前端实时用):
+  - `GET /api/samples?dir=` → 调 `samples.discover()`,回样本清单 + 配对约定;
+  - `GET /api/hardware` → Phase 1;
+  - `GET /api/plan?cores=&ram=&n=` → Phase 3 推荐 + 理由;
+  - `GET /api/db?name=&path=` → Phase 2 校验/发现,缺失时回 `download_hint`;
+  - `GET /api/required-dbs?...` → Phase 2 required_databases。
+- [ ] 4.4 `POST /save`:用 `Config(**payload)` 构造 → `validate()`;不通过回错误清单;
+  通过则 `to_yaml()` 写 `metaglens.yaml`,回成功页(附下一步命令 `metaglens run`)。
+- [ ] 4.5 `cli.py` 加 `configure` 命令:起服务、`webbrowser.open` 自动开(带 `--no-browser`);
+  终端打印 URL+token;`Ctrl-C` 优雅关停。headless 时不报错,只打印 URL 让用户端口转发。
+- [ ] 4.6 **对等测试**:构造一份 payload,分别经 web 的 `/save` 路径与直接 `Config.to_yaml`
+  产出 yaml,断言两者一致;`/api/*` 各接口的纯逻辑测试(不起真服务,直接测 handler 函数)。
+  **另加**:切换语言后 POST 同样输入,产出的 yaml **逐字节一致**(证明 i18n 不污染配置);
+  抽出共享主题后 `report.py` 重建报告的回归测试仍绿。
+- [ ] 4.7 commit `feat(express): metaglens configure — local web config (approach B)`。
+
+**安全自查**:确认未绑 `0.0.0.0`;无 token 请求返回 403;不写 DB 目录;不发起网络请求。
+
+---
+
+## Phase 5 — 文档
+
+- [ ] 5.1 `README.md`:新增 `metaglens configure` 用法 + 安全说明(127.0.0.1/token)+
+  「无 GUI 时用终端向导或端口转发」。
+- [ ] 5.2 在本文件对应 Phase 打勾并写完成备注。
+- [ ] 5.3 通知 IDE 会话审查(git diff)。
+
+---
+
+## 完成备注(实现方在此追加)
+
+<!-- 例:Phase 0 完成于 <commit>，验证输出：... -->
