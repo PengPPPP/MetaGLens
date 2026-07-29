@@ -184,4 +184,29 @@ class Config:
             errors.append("contig_taxonomy must be kraken2 or none.")
         if self.prokka_kingdom not in ("Bacteria", "Archaea", "Viruses"):
             errors.append("prokka_kingdom must be Bacteria, Archaea, or Viruses.")
+
+        # Cross-field consistency: the community stage (10_community) needs at
+        # least one taxonomy/abundance source. If it is selected but nothing can
+        # feed it, fail here rather than producing an empty table at runtime
+        # (see 10_community_summary.sh source-selection chain).
+        if self.route_name in routes.ROUTES or (
+            self.route_name == "custom" and self.custom_steps
+        ):
+            try:
+                steps = self.route.steps
+            except Exception:
+                steps = []
+            if "10_community" in steps:
+                has_mag_taxonomy = "07_taxonomy" in steps
+                has_contig_source = (
+                    "09_contig" in steps and self.contig_taxonomy == "kraken2"
+                )
+                if not has_mag_taxonomy and not has_contig_source:
+                    errors.append(
+                        "10_community is selected but no taxonomy source will be "
+                        "produced: this route has no 07_taxonomy stage and "
+                        "contig_taxonomy is 'none'. Set contig_taxonomy=kraken2 "
+                        "(requires a Kraken2 database) so 09_contig emits contig "
+                        "taxonomy, or drop 10_community from the route."
+                    )
         return errors

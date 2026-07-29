@@ -578,5 +578,65 @@ class TestSchedulerPaths(TempDirCase):
         self.assertEqual(checked, len(cfg.route.steps))
 
 
+class TestCommunitySourceFix(TempDirCase):
+    """Regression tests for §7-8: nullglob literal-array bug + empty-matrix guard."""
+
+    def _render_community(self) -> str:
+        cfg = self.make_cfg(route_name="mag_and_contig")
+        return render.render_step(cfg, "10_community", ["A", "B"])
+
+    def test_gtdb_summaries_uses_real_glob_not_literals(self):
+        text = self._render_community()
+        line = next(l for l in text.splitlines() if "GTDB_SUMMARIES=" in l)
+        # A real glob contains a wildcard; the buggy version listed two
+        # literal filenames (which nullglob cannot prune).
+        self.assertIn("*", line, line)
+        self.assertNotIn("gtdbtk.bac120.summary.tsv", line, line)
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash unavailable")
+    def test_nullglob_prunes_glob_but_not_literals(self):
+        empty = self.tmp / "emptydir"
+        empty.mkdir()
+        script = (
+            "shopt -s nullglob\n"
+            f'glob=("{empty}/"*.summary.tsv)\n'
+            f'lit=("{empty}/gtdbtk.bac120.summary.tsv" "{empty}/gtdbtk.ar53.summary.tsv")\n'
+            'echo "${#glob[@]} ${#lit[@]}"\n'
+        )
+        out = subprocess.run(["bash", "-c", script],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        # glob correctly collapses to 0; literal array stays at 2 (the bug).
+        self.assertEqual(out, "0 2")
+
+    def test_empty_matrix_guard_precedes_completed(self):
+        text = self._render_community()
+        self.assertIn("NUM_TAXA", text)
+        guard_idx = text.find("-lt 1")
+        completed_idx = text.find('update_step_status "${STEP_NAME}" "completed"')
+        self.assertGreater(guard_idx, 0, "empty-matrix guard missing")
+        self.assertGreater(completed_idx, 0, "completed marker missing")
+        self.assertLess(guard_idx, completed_idx,
+                        "guard must run before the stage is marked completed")
+
+
+class TestContigCommunityValidation(TempDirCase):
+    """§7-8 fail-fast: contig route needs a taxonomy source for 10_community."""
+
+    def test_contig_based_without_taxonomy_is_rejected(self):
+        cfg = self.make_cfg(route_name="contig_based", contig_taxonomy="none")
+        errs = cfg.validate()
+        self.assertTrue(any("10_community" in e and "contig_taxonomy" in e
+                            for e in errs), errs)
+
+    def test_contig_based_with_kraken2_is_accepted(self):
+        cfg = self.make_cfg(route_name="contig_based", contig_taxonomy="kraken2")
+        self.assertEqual(cfg.validate(), [])
+
+    def test_mag_route_unaffected_by_contig_taxonomy_none(self):
+        # mag routes carry 07_taxonomy, so the community source always exists.
+        cfg = self.make_cfg(route_name="mag_per_sample", contig_taxonomy="none")
+        self.assertEqual(cfg.validate(), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -50,17 +50,17 @@ POST 回写 `metaglens.yaml`。
 计数恒为 2 → `contig_based` 路线交付物是坏的。详见 `WORKLOG.md §6.2`。
 
 **步骤**
-- [ ] 0.1 `10_community_summary.sh:67`:把 `GTDB_SUMMARIES` 改成真 glob。
+- [x] 0.1 `10_community_summary.sh:67`:把 `GTDB_SUMMARIES` 改成真 glob。
   参考同文件 `06_dereplication.sh` 的多行 glob 写法:
   `GTDB_SUMMARIES=("${TAX_DIR}/gtdbtk/"*.summary.tsv)`(或分别列 bac120/ar53 的 glob 模式)。
-- [ ] 0.2 同文件 `:297` 附近:`NUM_TAXA==0` 时**拒绝**标 completed,报错退出并提示
+- [x] 0.2 同文件 `:297` 附近:`NUM_TAXA==0` 时**拒绝**标 completed,报错退出并提示
   「该来源产出空表,检查上游」。这是设计稿 §4.4「产物验证」的落地。
-- [ ] 0.3 `config.py` / `validate()`:当 `analysis_basis` 推出为 contig(或 route 含
+- [x] 0.3 `config.py` / `validate()`:当 `analysis_basis` 推出为 contig(或 route 含
   `09_contig`)且 `selected_steps` 含 `10_community`、而 `contig_taxonomy==none` 时,
   给出**明确错误**:「contig 路线要产出群落表需 contig_taxonomy=kraken2(需 kraken2 库)」。
   这是 §4.3「跑之前拦住」。**不要**把默认改成 kraken2(会静默引入 DB 依赖)。
-- [ ] 0.4 回归测试:`tests/` 加用例——字面量 vs 真 glob 计数差异、空表被拦、上述 validate 报错。
-- [ ] 0.5 `bash -n` 全模板 + unittest 全绿 → commit `fix: section 7-8 community-source nullglob & empty-matrix guard`。
+- [x] 0.4 回归测试:`tests/` 加用例——字面量 vs 真 glob 计数差异、空表被拦、上述 validate 报错。
+- [x] 0.5 `bash -n` 全模板 + unittest 全绿 → commit `fix: section 7-8 community-source nullglob & empty-matrix guard`。
 
 **验证**:构造一个"无 gtdbtk 输出"的目录,确认 SOURCE 不再误判 gtdbtk;contig 默认配置被 validate 拦住。
 
@@ -174,3 +174,24 @@ POST 回写 `metaglens.yaml`。
 ## 完成备注(实现方在此追加)
 
 <!-- 例:Phase 0 完成于 <commit>，验证输出：... -->
+
+### Phase 0 — §7-8 收尾（commit `<pending>`）
+
+- 0.1 `10_community_summary.sh:67` `GTDB_SUMMARIES` 改真 glob
+  `("${TAX_DIR}/gtdbtk/"*.summary.tsv)`；下游 python 仍按具体文件名 isfile 打开，安全。
+- 0.2 同文件在写出矩阵后、topN 前加产物校验：`NUM_TAXA<1` 则 `exit 1`（`enable_step_failure_trap`
+  已在 `:53` 装好，退出会被标 failed），并移除 `:297` 的重复计算。
+- 0.3 `config.py::validate()` 增跨字段一致性检查：`10_community` 在 route 内、且无 `07_taxonomy`
+  又 `contig_taxonomy!=kraken2` 时报明确错误。未改任何默认值。mag 路线不受影响（含 07_taxonomy）。
+- 0.4 新增 6 项测试（`TestCommunitySourceFix` ×3、`TestContigCommunityValidation` ×3），含
+  bash 实证 `glob=0 / literal=2`、guard 先于 completed、contig 默认被拦 / kraken2 放行。
+- 0.5 验证：`bash -n` 全 14 模板通过；`unittest` 59→**65** 全绿。
+
+关键输出：
+```
+$ bash -c 'shopt -s nullglob; a=("<empty>/"*.summary.tsv); l=("<empty>/x.tsv" "<empty>/y.tsv"); echo ${#a[@]} ${#l[@]}'
+0 2
+$ python3 -m unittest discover -s tests -t .
+Ran 65 tests in 0.849s
+OK
+```

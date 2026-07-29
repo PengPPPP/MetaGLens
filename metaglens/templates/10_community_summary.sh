@@ -64,7 +64,7 @@ shopt -s nullglob
 BRACKEN_FILES=("${TAX_DIR}/kraken2/"*_bracken.out)
 KRAKEN_READ_REPORTS=("${TAX_DIR}/kraken2/"*_report.txt)
 CONTIG_KRAKEN_REPORTS=("${CONTIG_TAX_DIR}/"*_contig_report.txt)
-GTDB_SUMMARIES=("${TAX_DIR}/gtdbtk/gtdbtk.bac120.summary.tsv" "${TAX_DIR}/gtdbtk/gtdbtk.ar53.summary.tsv")
+GTDB_SUMMARIES=("${TAX_DIR}/gtdbtk/"*.summary.tsv)
 MAG_RELABUND="${MAG_ABUND_DIR}/mag_relative_abundance.tsv"
 shopt -u nullglob
 
@@ -263,6 +263,17 @@ echo "${SOURCE_LABEL}" > "${OUTPUT_DIR}/SOURCE.txt"
 log "Community matrix: ${MATRIX}"
 log "Source: ${SOURCE_LABEL}"
 
+# ===== Product validation =====
+# A header-only matrix (zero data rows) must never be treated as success.
+# This guards against an abundance source that resolved but yielded no taxa.
+NUM_TAXA=$(( $(wc -l < "${MATRIX}") - 1 ))
+if [[ "${NUM_TAXA}" -lt 1 ]]; then
+    log "ERROR: Community matrix from source '${SOURCE}' is empty (0 taxa)."
+    log "       The abundance source resolved but produced no data rows."
+    log "       Check the upstream stage that feeds '${SOURCE}' (e.g. taxonomy/abundance outputs)."
+    exit 1
+fi
+
 # ===== Emit topN subsets =====
 # Rank rows by the sum of their numeric columns (relative abundance or count).
 for N in ${TOP_LEVELS}; do
@@ -294,7 +305,6 @@ PY
 done
 
 # ===== Summary =====
-NUM_TAXA=$(( $(wc -l < "${MATRIX}") - 1 ))
 log_step "Community Summary"
 log "Total taxa: ${NUM_TAXA}"
 log "topN tables: ${TOP_LEVELS}"
