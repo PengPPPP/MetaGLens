@@ -120,12 +120,12 @@ POST 回写 `metaglens.yaml`。
 **目标**:给出 `parallel_jobs × threads_per_job` 推荐 + **理由**(设计原则:解释权高于自动化)。
 
 **步骤**
-- [ ] 3.1 新建 `metaglens/decide/__init__.py`、`metaglens/decide/planner.py`。
-- [ ] 3.2 `recommend_parallel(cores, ram_gb, n_samples) -> Plan(jobs, threads_per_job, reason)`:
+- [x] 3.1 新建 `metaglens/decide/__init__.py`、`metaglens/decide/planner.py`。
+- [x] 3.2 `recommend_parallel(cores, ram_gb, n_samples) -> Plan(jobs, threads_per_job, reason)`:
   以现有 `render.build_global_values` 里的推导为基线,补上"单样本峰值内存 × 并发 ≤ 总内存"
   这一约束(内存系数放模块常量,标注为粗估),输出人话理由。
-- [ ] 3.3 测试:小内存/多样本场景应压低并发并给出理由;`jobs*threads ≤ cores`。
-- [ ] 3.4 commit `feat(decide): parallel plan recommendation with rationale`。
+- [x] 3.3 测试:小内存/多样本场景应压低并发并给出理由;`jobs*threads ≤ cores`。
+- [x] 3.4 commit `feat(decide): parallel plan recommendation with rationale`。
 
 ---
 
@@ -258,3 +258,12 @@ OK
 - 新增 8 项测试（scan/env/wrong_path/missing/validate/三种 required 组合）。
 - 验证：`unittest` 69→**77** 全绿；`bash -n` 全模板 OK；本机实测 `discover('gtdbtk')`
   →`ready scan r232 /home/h1020/gtdbtk_data/release232`（环境变量未设，纯靠文件系统扫描命中，版本读自 metadata）。
+
+### Phase 3 — `decide/planner.py`（commit `1bb91d7`）
+
+- `recommend_parallel(cores, ram_gb, n_samples) -> Plan(jobs, threads_per_job, reason, memory_capped)`。
+- 基线 `jobs=min(samples,cores)`，补内存约束 `jobs*PEAK_MEM_GB_PER_JOB(=24, 粗估) ≤ ram_gb`；
+  保证 `jobs*threads_per_job ≤ cores`；RAM 未知(0)时不做内存约束并在理由里说明。
+- 只决策资源类参数，不碰科学参数。
+- 新增 4 项测试（内存压并发+理由含 OOM、乘积≤cores 全组合、充裕内存满并发、RAM 未知不压）。
+- 验证：`unittest` 77→**81** 全绿；`bash -n` 全模板 OK。
