@@ -967,5 +967,78 @@ class TestWebConfig(TempDirCase):
             pass
 
 
+class TestMonitor(unittest.TestCase):
+    """Phase 6: self-refreshing static monitor page."""
+
+    def _results(self) -> Path:
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        (d / "pipeline_status.json").write_text(json.dumps({
+            "project_name": "demo", "route_name": "mag_per_sample",
+            "analysis_basis": "mag",
+            "selected_steps": ["00_setup", "01_qc", "02_assembly", "04_binning"],
+            "steps": {
+                "00_setup": {"status": "completed", "attempts": 1,
+                             "started": "10:00", "finished": "10:01"},
+                "01_qc": {"status": "completed", "attempts": 1,
+                          "started": "10:01", "finished": "10:20"},
+                "02_assembly": {"status": "running", "attempts": 1,
+                                "started": "10:20"},
+                "04_binning": {"status": "pending", "attempts": 0},
+            },
+            "last_failure": {},
+        }), encoding="utf-8")
+        logs = d / "reports" / "logs"
+        logs.mkdir(parents=True)
+        (logs / "02_assembly.log").write_text(
+            "line1\nline2\n[k=99] assembling contigs from SdBG\n", encoding="utf-8")
+        return d
+
+    def test_collect_picks_running_stage_and_log(self):
+        from metaglens.observe import monitor
+        data = monitor.collect(self._results())
+        self.assertEqual(data["current"], "02_assembly")
+        self.assertIn("assembling contigs", data["log_tail"])
+        self.assertEqual(len(data["steps"]), 4)
+
+    def test_render_contains_skin_refresh_and_states(self):
+        from metaglens.observe import monitor
+        data = monitor.collect(self._results())
+        html = monitor.render_html(data, refresh=7)
+        self.assertIn('http-equiv="refresh" content="7"', html)
+        self.assertIn("--brand:#38A8F0", html)             # shared palette
+        self.assertIn('points="100,4 183.14,52', html)     # shared lens
+        for step in ("00_setup", "01_qc", "02_assembly", "04_binning"):
+            self.assertIn(step, html)
+        self.assertIn("assembling contigs", html)          # log tail embedded
+        self.assertIn("var(--warn)", html)                 # running stage color
+
+    def test_failed_stage_marked_red(self):
+        from metaglens.observe import monitor
+        data = {
+            "project": "p", "route": "r", "basis": "mag",
+            "steps": [{"step": "04_binning", "status": "failed",
+                       "started": "1", "finished": "", "attempts": 2}],
+            "current": "04_binning", "log_file": "04_binning.log",
+            "log_tail": "boom", "last_failure": {
+                "stage": "04_binning", "command": "metabat2",
+                "exit_code": 1, "line": 42},
+        }
+        html = monitor.render_html(data)
+        self.assertIn("var(--bad)", html)
+        self.assertIn("Last failure", html)
+        self.assertIn("metabat2", html)
+
+    def test_write_monitor_writes_selfcontained_file(self):
+        from metaglens.observe import monitor
+        results = self._results()
+        out = monitor.write_monitor(results, refresh=5)
+        self.assertTrue(out.is_file())
+        self.assertEqual(out.name, "monitor.html")
+        html = out.read_text(encoding="utf-8")
+        self.assertIn('http-equiv="refresh"', html)
+        self.assertIn("MetaGLens Monitor", html)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

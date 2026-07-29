@@ -351,6 +351,34 @@ def status(config: str = ConfigOpt) -> None:
             )
 
 
+# ─── monitor ─────────────────────────────────────────────────────────────────
+@app.command()
+def monitor(
+    config: str = ConfigOpt,
+    interval: int = typer.Option(5, "--interval", help="Refresh seconds."),
+    once: bool = typer.Option(False, "--once", help="Write one snapshot and exit."),
+) -> None:
+    """Write a self-refreshing monitor.html (open it with file://; side-car)."""
+    from metaglens.observe import monitor as monitor_mod
+    cfg = _load_config(config)
+    results = cfg.results_dir
+    if not results.is_dir():
+        _fail("Results directory not found. Run the pipeline first.")
+        raise typer.Exit(code=2)
+    out = monitor_mod.write_monitor(results, refresh=interval)
+    console.print(f"[green]✓[/green] Monitor page: file://{out}")
+    if once:
+        return
+    console.print(f"[dim]Rewriting every {interval}s. Ctrl-C to stop.[/dim]")
+    import time
+    try:
+        while True:
+            time.sleep(interval)
+            monitor_mod.write_monitor(results, refresh=interval)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Monitor stopped (monitor.html keeps its last state).[/dim]")
+
+
 # ─── report ──────────────────────────────────────────────────────────────────
 @app.command()
 def report(config: str = ConfigOpt) -> None:
