@@ -291,6 +291,53 @@ POST 回写 `metaglens.yaml`。
 
 ---
 
+## Phase 9 — `prodigal` 修复 + `demo`(桩工具端到端)+ CI
+
+### 9.A `prodigal` 缺口(IDE 会话已裁定:修)
+
+证据:`09_contig_analysis.sh:116` 直接调用 `prodigal`;`conda_setup.ENV_GROUPS` 与
+`conda_env.PIPELINE_TOOLS` **都没有它**;而 skill 版 SKILL.md 明确把 Prodigal 列入
+待检查工具。故这是软件版的遗漏,非有意取舍。
+
+- [ ] 9.A1 `ENV_GROUPS["mag"]` 加 `prodigal`(`09_contig`/`08_annotation` 的 env_group 均为 mag)。
+- [ ] 9.A2 `conda_env.PIPELINE_TOOLS` 加 `prodigal`(否则向导缺失检查同样漏报)。
+- [ ] 9.A3 测试:`setup-env` 的 mag 组命令含 prodigal;contig 路线 `required_tools` 与
+  `ENV_GROUPS` 不再出现"要求但装不上"的差集。**建议加一条通用断言:
+  `required_tools` 覆盖的每个工具都能被某个 ENV_GROUP 提供**——防止再漏第二个。
+- [ ] 9.A4 commit `fix(conda): ship prodigal — required by contig route but absent from env groups`。
+
+### 9.B `metaglens demo` — 桩工具端到端(方案已定)
+
+**目标**:装完就能几秒内验证整条链路可用;同时成为后续所有改动的回归网。
+
+**选型**:**桩工具(stub toolchain)**。造极小假可执行(`fastp`/`megahit`/`bowtie2`/`samtools`/
+`seqkit`/`metabat2`/`prodigal`/... 各吐出格式合法的最小产物),置于临时 PATH 最前,
+让**真实模板完整执行**。理由:零依赖、零数据库、完全离线、几秒完成,且检验的是模板的
+**真实控制流 + 状态机 + 产物验证 + 报告/监控生成**,而非仅 `bash -n`。
+(这类测试本可抓到 §7-8 的 nullglob bug——桩工具不产 gtdbtk 输出时,来源选择会被真正走一遍。)
+
+- [ ] 9.B1 `metaglens/demo/` :合成极小 FASTQ(每样本几千条,内置或即时生成)+ 桩工具集。
+  桩必须产出**下游真正会读的最小合法产物**(如 fastp 的 `_fastp.json` 含 summary 字段、
+  contigs FASTA、BAM 可被后续步骤识别的替代物等);桩要**打印自己被调用**便于诊断。
+- [ ] 9.B2 `metaglens demo [--route NAME] [--keep] [--json]`:建临时项目 → 渲染 → 用桩 PATH
+  跑完选定路由 → 断言各阶段 `completed`、关键产物存在、`report.html` 与 `monitor.html` 生成
+  → 打印结论并清理(`--keep` 保留供排查)。**默认不碰用户已有项目、不写 `~`**。
+- [ ] 9.B3 至少覆盖 `mag_per_sample` 与 `contig_based` 两条路由(后者正是 §7-8 出问题的那条)。
+- [ ] 9.B4 测试 + `README` 说明 `demo` 是"装完自检 + 回归网",并注明它用桩工具、
+  **不产生科学结果**(避免误解为真实分析)。
+- [ ] 9.B5 commit `feat(demo): offline end-to-end self-check with a stub toolchain`。
+
+**后续可选(本阶段不做)**:`demo --full` 用真实工具跑最短路由,受工具可用性限制。
+
+### 9.C CI
+
+- [ ] 9.C1 `.github/workflows/ci.yml`:矩阵 Python 3.8/3.10+;跑
+  `python3 -m unittest discover -s tests -t .`、`bash -n` 全模板、`metaglens demo`(桩)。
+  不依赖网络与 conda。
+- [ ] 9.C2 commit `ci: run tests, bash -n and the stub demo`。
+
+---
+
 ## 已定决策
 
 - **Phase 6 选型 = 方案 S**(自刷新静态页,无服务)——用户 2026-07-30 确认。
