@@ -353,6 +353,12 @@ $ bash -n metaglens/templates/*.sh (14 个)             -> OK
 
 > ⚠ **风险：仓库至今无任何 commit。** 已 `git init` 但未提交,两个会话并行改文件
 > 而无基线,一旦覆盖**无法回滚**。已多次向用户提请做基线提交,待处理。
+>
+> **✅ 已解决(2026-07-30)**:基线提交 `0b873d9`(37 文件 / 8327 行)已落地。
+> 同时统一署名:git 全局身份 + LICENSE + pyproject 均为 `PengPPPP` / Fudan University。
+> git 邮箱用 GitHub noreply(`185229444+PengPPPP@users.noreply.github.com`),
+> 使提交在 GitHub 上归属 `PengPPPP` 且不暴露真实邮箱。
+> `.gitignore` 补排除 `.qoder/`(IDE 本地权限缓存)。
 
 ### 6.2 对方发现的 §7-8:`10_community_summary.sh` 字面量数组 bug
 
@@ -403,3 +409,57 @@ GTDB_SUMMARIES=("${TAX_DIR}/gtdbtk/gtdbtk.bac120.summary.tsv" "...ar53.summary.t
 
 **状态**:§7-8 待修(归本会话)。修法 = 真 glob + `NUM_TAXA` 守卫 +
 上述 fail-fast + 回归测试。
+
+---
+
+## 7. 连续执行成果审查(2026-07-30,用户休息期间)
+
+实现方(tmux 会话)连续完成 **Phase 0→6**,IDE 会话逐项独立复核。**结论:全部通过。**
+
+### 7.1 提交链
+
+```
+27304f4 fix: §7-8 community-source nullglob & empty-matrix guard   (Phase 0)
+6741141 feat(sense): hardware probing with stdlib fallback          (Phase 1)
+51f52d1 feat(sense): database registry, discovery, validation       (Phase 2)
+1bb91d7 feat(decide): parallel plan recommendation with rationale   (Phase 3)
+a223ce4 feat(express): metaglens configure — local web config       (Phase 4)
+dab955c feat(cli): init offers shell-wizard or web config           (Phase 4.8)
+df40665 feat(observe): live self-refreshing monitor.html            (Phase 6)
+6bbbf43 docs: README for configure & monitor
+6a57fb8 build: include sense/decide/express/observe subpackages
+```
+
+测试 **59 → 95 项全绿**;`bash -n` 过全部 14 个模板;工作区干净。
+
+### 7.2 用户硬要求的独立验证(不采信声明,只看代码与实跑)
+
+| 要求 | 验证方式 | 结果 |
+|---|---|---|
+| 风格与报告全对齐、只换 logo | 抽出 `metaglens/_theme.py`(`REPORT_CSS`+`LENS_SVG`),`report.py` / `webconfig.py` / `observe/monitor.py` **三处同 import**;调色板全仓只出现一次 | ✅ 单一事实来源 |
+| logo 可替换、不写死 | `_load_logo_b64()` 读单一 b64 资产 | ✅ |
+| 中英切换、不污染配置 | 真起服务,zh 与 en 各 POST 一次同输入 → yaml **逐字节一致**,且不含 `lang`/`token` 键 | ✅ |
+| 方案 B 本地小服务 | 实跑:绑 `127.0.0.1`、无 token → **403**、带 token → 200(306 KB 自包含页) | ✅ |
+| 共享服务器安全 | 未出现 `0.0.0.0`;token 用 `secrets.token_urlsafe(24)` + `compare_digest`(恒定时间) | ✅ |
+| 离线优先、不加重依赖 | `dependencies` 仍为 PyYAML/typer/rich;无 Flask/FastAPI/requests;`psutil` 在函数内 try-import,仅作交叉校验 | ✅ |
+| 数据库指定路径 + 校验 + 缺失指引 | 实跑 `/api/db`:扫到 `~/gtdbtk_data/release232`,并从 `metadata/metadata.txt` 读出 **r232**(非猜目录名) | ✅ |
+| 实时监控页(方案 S) | 实跑 `write_monitor()`:自刷新 meta、四阶段状态、日志尾(`k=99`)、失败态渲染、无外部资源 | ✅ |
+| 终端功能保留 | `run_wizard` 仍在;`status` 命令仍在;`init` 默认走终端向导 | ✅ |
+| 并行推荐带理由 | 实测 16c/64G/8样本 → 压到 2×8(因 ~24 GB/job × 8 > 64 GB),`jobs*threads ≤ cores` 恒成立 | ✅ |
+
+### 7.3 审查中我自己的两次误判(留档)
+
+1. **误以为没抽共享视觉模块**。实际抽到了 `metaglens/_theme.py`——计划原文给了
+   `express/theme.py` **或** `metaglens/_theme.py` 两个位置,我只查了前者。
+2. **误报内存探测有 bug**。我曾用 `SC_PAGE_SIZE * SC_PHYS_PAGES` 算出 1081.5 GB,
+   与 `hardware.py` 报的 498 GB 冲突。核 `/proc/meminfo`(MemTotal 522240000 kB)与
+   `free -g`(total 498)后确认:**`hardware.py` 正确,我的 sysconf 算法在本机失真**。
+   `_BYTES_PER_GB = 1024**3`(GiB),与 `free -g` 同口径,内部一致。
+
+教训同 §6.2 末尾那条:**下结论前先读源码/查权威值**。
+
+### 7.4 遗留
+
+- 设计稿 §8 的 P0 仍有 **`metaglens demo`**(迷你数据集端到端自检)与 **CI** 未做。
+- P1 尚未做完的部分:`doctor` / `db` / `plan` 三个命令本身(底座 `sense/` 已具备)、
+  `advisor.py` 规则引擎、`gates` / `diagnose` / `repair`(P2/P4)。
