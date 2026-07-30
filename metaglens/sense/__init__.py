@@ -17,6 +17,13 @@ from .database import (
     required_databases,
     validate,
 )
+from .tools import (
+    TOOL_SPECS,
+    ToolSpec,
+    all_known_tools,
+    required_tools,
+    tool_spec,
+)
 
 __all__ = [
     "HardwareInfo",
@@ -27,4 +34,9 @@ __all__ = [
     "discover",
     "required_databases",
     "validate",
+    "TOOL_SPECS",
+    "ToolSpec",
+    "all_known_tools",
+    "required_tools",
+    "tool_spec",
 ]

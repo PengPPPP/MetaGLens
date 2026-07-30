@@ -1159,5 +1159,94 @@ class TestEditableSampleTable(TempDirCase):
         self.assertFalse(Path(out).exists())
 
 
+class TestRequiredTools(TempDirCase):
+    """Phase 8.1: required_tools follows route + switches (ruling D-2 base)."""
+
+    def test_mag_default_requires_expected_tools(self):
+        from metaglens.sense import tools
+        cfg = self.make_cfg(route_name="mag_per_sample")
+        need = tools.required_tools(cfg)
+        for expected in ("fastp", "megahit", "seqkit", "bowtie2", "samtools",
+                         "metabat2", "checkm2", "drep", "gtdbtk", "prokka",
+                         "eggnog-mapper"):
+            self.assertIn(expected, need, expected)
+        # Alternatives for switched-off choices must be absent.
+        self.assertNotIn("spades", need)
+        self.assertNotIn("bwa-mem2", need)
+        self.assertNotIn("kraken2", need)
+        self.assertNotIn("bracken", need)
+
+    def test_contig_route_does_not_require_binning_or_mag_tools(self):
+        from metaglens.sense import tools
+        cfg = self.make_cfg(route_name="contig_based", contig_taxonomy="kraken2")
+        need = tools.required_tools(cfg)
+        for absent in ("maxbin2", "concoct", "das_tool", "checkm2", "drep",
+                       "gtdbtk", "prokka"):
+            self.assertNotIn(absent, need, absent)
+        self.assertIn("kraken2", need)
+        self.assertIn("prodigal", need)   # 09_contig predicts genes
+
+    def test_assembler_and_aligner_switches(self):
+        from metaglens.sense import tools
+        cfg = self.make_cfg(assembler="metaspades", align_tool="bwa-mem2")
+        need = tools.required_tools(cfg)
+        self.assertIn("spades", need)
+        self.assertNotIn("megahit", need)
+        self.assertIn("bwa-mem2", need)
+        self.assertNotIn("bowtie2", need)
+
+    def test_bowtie2_needed_for_host_removal_even_with_bwa(self):
+        from metaglens.sense import tools
+        cfg = self.make_cfg(align_tool="bwa-mem2", remove_host=True,
+                            host_genome="/tmp/host.fa")
+        need = tools.required_tools(cfg)
+        self.assertIn("bowtie2", need)
+        self.assertIn("host", need["bowtie2"])
+
+    def test_metabat2_needed_for_depth_without_binning(self):
+        """jgi_summarize_bam_contig_depths ships with metabat2."""
+        from metaglens.sense import tools
+        cfg = self.make_cfg(route_name="contig_based", contig_taxonomy="kraken2",
+                            calc_depth=True)
+        need = tools.required_tools(cfg)
+        self.assertIn("metabat2", need)
+        self.assertIn("depth", need["metabat2"])
+
+    def test_binner_switches_respected(self):
+        from metaglens.sense import tools
+        cfg = self.make_cfg(use_maxbin2=False, use_concoct=False,
+                            use_das_tool=False)
+        need = tools.required_tools(cfg)
+        self.assertNotIn("maxbin2", need)
+        self.assertNotIn("concoct", need)
+        self.assertNotIn("das_tool", need)
+        self.assertIn("metabat2", need)
+
+    def test_bracken_only_with_kraken_taxonomy(self):
+        from metaglens.sense import tools
+        cfg = self.make_cfg(taxonomy_tool="kraken2", use_bracken=True)
+        self.assertIn("bracken", tools.required_tools(cfg))
+        cfg2 = self.make_cfg(taxonomy_tool="gtdbtk", use_bracken=True)
+        self.assertNotIn("bracken", tools.required_tools(cfg2))
+
+    def test_every_required_tool_has_a_reason_and_command(self):
+        from metaglens.sense import tools
+        cfg = self.make_cfg(route_name="mag_and_contig")
+        need = tools.required_tools(cfg)
+        self.assertTrue(need)
+        for tool, reason in need.items():
+            self.assertTrue(reason.strip(), tool)
+            spec = tools.tool_spec(tool)
+            self.assertIsNotNone(spec, tool)
+            self.assertTrue(spec.command)
+
+    def test_required_is_subset_of_known(self):
+        from metaglens.sense import tools
+        known = set(tools.all_known_tools())
+        for route in ("mag_per_sample", "contig_based", "mag_and_contig"):
+            cfg = self.make_cfg(route_name=route, contig_taxonomy="kraken2")
+            self.assertLessEqual(set(tools.required_tools(cfg)), known, route)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
