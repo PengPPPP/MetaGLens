@@ -49,8 +49,14 @@ def _log_tail(results_dir: Path, step_id: str, max_lines: int = 40) -> str:
     return "\n".join(lines[-max_lines:])
 
 
-def collect(results_dir: Path, max_log_lines: int = 40) -> Dict[str, Any]:
-    """Gather monitor data from pipeline_status.json + current stage log."""
+def collect(results_dir: Path, max_log_lines: int = 40,
+            with_resources: bool = True,
+            measure_disk: bool = False) -> Dict[str, Any]:
+    """Gather monitor data from pipeline_status.json + current stage log.
+
+    This is the single collection layer: the self-refreshing HTML page and the
+    terminal dashboard both read it, so the two views cannot drift apart.
+    """
     results_dir = Path(results_dir)
     status_path = results_dir / "pipeline_status.json"
     status: Dict[str, Any] = {}
@@ -89,15 +95,40 @@ def collect(results_dir: Path, max_log_lines: int = 40) -> Dict[str, Any]:
 
     last_failure = status.get("last_failure") or {}
 
+    # Progress for the active stage, and a resource snapshot.
+    progress: Dict[str, Any] = {}
+    if current:
+        try:
+            from .progress import parse_stage
+            progress = parse_stage(results_dir, current).as_dict()
+        except Exception:
+            progress = {}
+
+    resources: Dict[str, Any] = {}
+    if with_resources:
+        try:
+            from .resources import sample as sample_resources
+            resources = sample_resources(results_dir,
+                                         measure_disk=measure_disk).as_dict()
+        except Exception:
+            resources = {}
+
+    completed = sum(1 for s in steps if s["status"] == "completed")
+
     return {
         "project": status.get("project_name", ""),
         "route": status.get("route_name", ""),
         "basis": status.get("analysis_basis", ""),
         "steps": steps,
         "current": current,
+        "completed": completed,
+        "total_steps": len(steps),
         "log_file": f"{current}.log" if current else "",
         "log_tail": log_tail,
         "last_failure": last_failure,
+        "progress": progress,
+        "resources": resources,
+        "gates": status.get("gates", {}),
     }
 
 
@@ -141,6 +172,43 @@ def render_html(data: Dict[str, Any], refresh: int = 5, logo_b64: str = "") -> s
     cur_html = (f'<b>{e(current)}</b>' if current
                 else '<span class="empty">no active stage</span>')
 
+    progress = data.get("progress") or {}
+    progress_html = ""
+    if progress:
+        bits = []
+        if progress.get("determinate") and progress.get("fraction") is not None:
+            pct = float(progress["fraction"]) * 100.0
+            bits.append(
+                f'<div class="tl-bar" style="margin:8px 0"><div class="tl-fill" '
+                f'style="width:{pct:.0f}%;background:var(--blue)"></div></div>'
+            )
+        if progress.get("detail"):
+            bits.append(f'<div>{e(str(progress["detail"]))}</div>')
+        active = progress.get("active") or []
+        if active:
+            bits.append(f'<div class="empty">in flight: '
+                        f'{e(", ".join(str(a) for a in active))}</div>')
+        if progress.get("heartbeat"):
+            # Silence is information, not a verdict.
+            bits.append(f'<div class="empty">{e(str(progress["heartbeat"]))}</div>')
+        progress_html = "".join(bits)
+
+    resources = data.get("resources") or {}
+    resource_html = ""
+    if resources:
+        parts = []
+        if resources.get("cpu_percent") is not None:
+            parts.append(f'CPU ~{float(resources["cpu_percent"]):.0f}%')
+        if resources.get("ram_total_gb"):
+            used = resources.get("ram_used_gb") or 0.0
+            parts.append(f'RAM {float(used):.0f}/'
+                         f'{float(resources["ram_total_gb"]):.0f} GB')
+        if resources.get("disk_free_gb") is not None:
+            parts.append(f'disk free {float(resources["disk_free_gb"]):.0f} GB')
+        if parts:
+            resource_html = ('<div class="chip">' + e(" · ".join(parts))
+                             + "</div>")
+
     fail = data.get("last_failure") or {}
     fail_html = ""
     if fail and fail.get("stage"):
@@ -171,11 +239,15 @@ def render_html(data: Dict[str, Any], refresh: int = 5, logo_b64: str = "") -> s
         '<div class="meta">\n'
         f'<div class="chip">Project: <b>{e(data.get("project",""))}</b></div>\n'
         f'<div class="chip">Route: <b>{e(data.get("route",""))}</b></div>\n'
+        f'<div class="chip">Stages: <b>{data.get("completed", 0)}/'
+        f'{data.get("total_steps", 0)}</b></div>\n'
         f'<div class="chip">Current stage: {cur_html}</div>\n'
+        f'{resource_html}\n'
         '</div>\n<main>\n'
         f'{fail_html}\n'
         '<div class="card">\n'
         '<h2>Pipeline</h2>\n'
+        f'{progress_html}\n'
         f'{timeline}\n</div>\n'
         '<div class="card">\n'
         f'<h2>Log — {e(data.get("log_file","") or "(none)")}</h2>\n'
