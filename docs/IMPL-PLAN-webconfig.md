@@ -248,6 +248,49 @@ POST 回写 `metaglens.yaml`。
 
 ---
 
+## Phase 8 — P1 命令层:`doctor` / `db` / `plan`
+
+**动机**:`sense/` 底座已就位(Phase 1–2),但三个"跑之前拦住错误配置"的命令还没有。
+这是设计稿 P1「别让他白跑」的正主,也是新手最高代价失败(缺 DB、内存不够、路径写错)
+的唯一拦截点。增量很小,价值最高。
+
+- [ ] 8.1 **`required_tools(cfg) -> {tool: reason}`(前置底座,先做)**。
+  现有 `PIPELINE_TOOLS` 是扁平 18 项常量,推不出"本次真正要用哪些"。映射:
+  route → `routes.STEPS[x].env_group` → `conda_setup.ENV_GROUPS[group]`,再叠加配置开关
+  (`assembler` megahit/spades、`align_tool` bowtie2/bwa-mem2、`taxonomy_tool`、
+  `contig_taxonomy`、`use_prokka` / `use_eggnog` / `use_bracken` / 四个 binner 开关)。
+  与 `required_databases()` 对称。**这是 doctor/plan 共用底座。**
+- [ ] 8.2 **`metaglens doctor [--env NAME] [--fix] [--json]`**(设计稿 §4.1):
+  输出分组表格:工具×版本(按 `--env` 或 config 的环境)、**可执行文件在 PATH 上真的能跑吗**
+  (`conda list` 有包 ≠ 命令可用)、数据库就位情况(复用 `sense/database`)、硬件余量
+  (复用 `sense/hardware`)。
+  **按裁决 D-2**:当前路线用不到的工具**照常展示但标注「当前路线不需要」,不算缺失、不报错**;
+  只有 `required_tools` 里的缺失才是问题。`--fix` **只补装缺失,永不升级已有包**
+  (沿用 skill "不做 conda update --all" 的约束),且执行前需确认。
+- [ ] 8.3 **`metaglens db list|status|get|verify|where [--json]`**(设计稿 §4.7):
+  - `status` / `list`:只显示 `required_databases(cfg)` 推出来的库 + 三态(就位/路径错/未找到);
+  - `where <name>`:打印**完整解析链**及命中的是哪一级(显式 → 环境变量 → 文件系统扫描 → 默认);
+  - `verify <name>`:只读校验(sentinel + 版本),**不得往 DB 目录写任何临时文件**;
+  - `get <name>`:**按裁决 B**——强制显式目标目录(不预设可写默认路径),下载前
+    **校验剩余空间 ≥ 体积 × 1.2**,不足则拒绝并提示换盘;**必须显式确认才真下载**
+    (200 GB 级操作,默认不动手)。
+- [ ] 8.4 **`metaglens plan [--json]`**(设计稿 §4.3):阶段表(模式/预估时长/峰值内存/
+  磁盘增量),合计行,并对缺失的必需数据库**预警 + 给出 `db get` 命令**。
+  时长/内存**必须标注为粗估(±50%)**并说明依据的样本规模——给带误差标注的量级判断,
+  但不许假装精确。
+  **另含 D-6 附加项 B**:提供一份**可粘贴的纯文本摘要**(`--plain` 或摘要区),供学生向
+  导师/管理方申请资源使用,并能同时说明「本流程不产生任何计费」。
+- [ ] 8.5 测试:`required_tools` 随路由/开关变化(contig 路线不应要求 binner/checkm2 等);
+  doctor 在"环境不存在"与"conda 不可用"下的表现(复用已修的三态);`db where` 解析链
+  命中层级正确;`db get` 空间不足时拒绝;`plan` 在缺 DB 时给出预警;`--json` 可被 `json.loads`。
+- [ ] 8.6 `README` 补三个命令用法。commit 分三个:
+  `feat(sense): required_tools`、`feat(cli): doctor & db commands`、`feat(cli): plan command`。
+
+**铁律不变**:离线优先、不引重依赖、只读不写别人的 DB 目录、大额下载必须显式确认、
+科学参数不自动改。
+
+---
+
 ## 已定决策
 
 - **Phase 6 选型 = 方案 S**(自刷新静态页,无服务)——用户 2026-07-30 确认。
