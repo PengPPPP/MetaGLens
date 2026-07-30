@@ -1,0 +1,115 @@
+# Parameter advice — resource-class recommendations only.
+#
+# Every rule carries a reason written for a human, because a recommendation
+# without a rationale is just an unexplained order (design principle: the right
+# to an explanation outranks automation).
+#
+# Hard boundary: `advise` may only touch RESOURCE parameters — parallel_jobs,
+# threads_per_job, total_threads, memory, assembler choice. Rules about
+# scientific parameters (completeness_min, ani_threshold, min_contig_len ...)
+# are allowed to WARN with severity: info/warn and an empty `advise`, so the
+# user decides. Nothing here may silently change a scientific threshold.
+#
+# Placeholders available in `reason`: {cores} {ram_gb} {n_samples}
+# {reads_per_sample} {parallel_jobs} {threads_per_job} {assembler}
+# {peak_mem_estimate} {value}
+
+- id: assembler.metaspades_needs_ram
+  when:
+    assembler: metaspades
+    ram_gb_below: 128
+    n_samples_at_least: 1
+  advise:
+    assembler: megahit
+  severity: warn
+  scope: resource
+  reason: >-
+    metaSPAdes on {ram_gb} GB of RAM frequently exhausts memory on a full-size
+    metagenome. MEGAHIT is markedly more memory-frugal at comparable contiguity
+    for complex communities, and is the safer default on this machine.
+  citation: MEGAHIT (Li et al. 2015); metaSPAdes (Nurk et al. 2017)
+
+- id: parallel.oversubscribed_threads
+  when:
+    threads_per_job_below: 4
+  advise:
+    parallel_jobs: "max(1, cores // 4)"
+  severity: warn
+  scope: resource
+  reason: >-
+    At {threads_per_job} thread(s) per job, assemblers spend more time
+    contending for I/O than assembling. Fewer concurrent jobs with at least 4
+    threads each usually finishes the same work sooner.
+
+- id: parallel.memory_oversubscribed
+  when:
+    peak_memory_exceeds_ram: true
+  advise:
+    parallel_jobs: "max(1, int(ram_gb // 24))"
+  severity: warn
+  scope: resource
+  reason: >-
+    {parallel_jobs} concurrent job(s) at roughly 24 GB peak each needs about
+    {peak_mem_estimate} GB, which exceeds the {ram_gb} GB available. Without
+    lowering concurrency this run is likely to be killed by the OOM killer.
+
+- id: parallel.idle_cores
+  when:
+    cores_at_least: 8
+    utilisation_below: 0.5
+  advise: {}
+  severity: info
+  scope: resource
+  reason: >-
+    The current plan uses {parallel_jobs} x {threads_per_job} of {cores}
+    available cores. Raising parallel_jobs would shorten the run if memory
+    allows — check `metaglens plan` for the memory estimate first.
+
+- id: kraken2.index_larger_than_ram
+  when:
+    read_profiling_kraken2: true
+    ram_gb_below: 110
+  advise: {}
+  severity: warn
+  scope: resource
+  reason: >-
+    Kraken2 loads its entire index into RAM. The standard index needs roughly
+    100 GB, which does not fit in {ram_gb} GB at any thread count — pick a
+    smaller index variant (standard-8 or standard-16) rather than reducing
+    threads.
+
+# ── Scientific parameters: advisory only, never auto-applied ────────────────
+
+- id: science.completeness_below_mimag_medium
+  when:
+    completeness_min_below: 50
+  advise: {}
+  severity: info
+  scope: science
+  reason: >-
+    completeness_min is {value}, below the MIMAG medium-quality bar of 50%.
+    Retained genomes may be too partial to support metabolic-completeness
+    claims. This is a scientific choice, so MetaGLens will not change it — see
+    `metaglens explain completeness_min`.
+
+- id: science.contamination_above_mimag_medium
+  when:
+    contamination_max_above: 10
+  advise: {}
+  severity: info
+  scope: science
+  reason: >-
+    contamination_max is {value}, above the MIMAG medium-quality limit of 10%.
+    Bins that contaminated are usually better treated as mixtures than as
+    genomes. Left unchanged deliberately — see
+    `metaglens explain contamination_max`.
+
+- id: science.min_contig_len_low
+  when:
+    min_contig_len_below: 500
+  advise: {}
+  severity: info
+  scope: science
+  reason: >-
+    min_contig_len is {value}. Very short contigs carry little gene content and
+    add noise to binning; 1000 is the usual compromise. Advisory only.
