@@ -1633,5 +1633,150 @@ class TestStubDemo(unittest.TestCase):
                               f"{route}: no stub for '{command}' ({tool})")
 
 
+class TestProductValidation(TempDirCase):
+    """Phase 10.1/10.2: semantic product validation, not "file is non-empty"."""
+
+    def _results(self) -> Path:
+        r = self.tmp / "res"
+        r.mkdir(parents=True, exist_ok=True)
+        (r / "samples.tsv").write_text(
+            "sample_id\tr1\tr2\nA\t/x/A_R1.fq\t/x/A_R2.fq\n", encoding="utf-8")
+        (r / "pipeline_status.json").write_text("{}", encoding="utf-8")
+        return r
+
+    # -- the headline case: header-only files must fail -------------------- #
+    def test_header_only_table_fails(self):
+        from metaglens import state
+        r = self._results()
+        (r / "10_community").mkdir()
+        matrix = r / "10_community" / "community_matrix.tsv"
+        matrix.write_text("taxon\tA\n", encoding="utf-8")
+        self.assertGreater(matrix.stat().st_size, 0)   # non-empty ...
+        report = state.validate_stage(r, "10_community")
+        self.assertFalse(report.ok)                   # ... but still invalid
+        self.assertIn("header line alone", " ".join(report.failures))
+
+    def test_table_with_data_row_passes(self):
+        from metaglens import state
+        r = self._results()
+        (r / "10_community").mkdir()
+        (r / "10_community" / "community_matrix.tsv").write_text(
+            "taxon\tA\ns__Foo\t12.5\n", encoding="utf-8")
+        self.assertTrue(state.validate_stage(r, "10_community").ok)
+
+    def test_empty_bins_dir_fails(self):
+        from metaglens import state
+        r = self._results()
+        (r / "04_binning" / "all_bins").mkdir(parents=True)
+        self.assertFalse(state.validate_stage(r, "04_binning").ok)
+        (r / "04_binning" / "all_bins" / "bin1.fa").write_text(
+            ">c1\nACGT\n", encoding="utf-8")
+        self.assertTrue(state.validate_stage(r, "04_binning").ok)
+
+    def test_empty_fasta_fails_even_when_file_exists(self):
+        from metaglens import state
+        r = self._results()
+        unit = r / "02_assembly" / "A"
+        unit.mkdir(parents=True)
+        contigs = unit / "final.contigs_filtered.fa"
+        contigs.write_text("# a comment but no sequences\n", encoding="utf-8")
+        self.assertGreater(contigs.stat().st_size, 0)
+        self.assertFalse(state.validate_stage(r, "02_assembly", ["A"]).ok)
+
+    def test_qc_requires_actual_reads(self):
+        from metaglens import state
+        import gzip
+        r = self._results()
+        qc = r / "01_qc"
+        qc.mkdir()
+        for mate in (1, 2):
+            with gzip.open(qc / f"A_clean_R{mate}.fastq.gz", "wt") as fh:
+                fh.write("")            # valid gzip, zero records
+        self.assertFalse(state.validate_stage(r, "01_qc", ["A"]).ok)
+        for mate in (1, 2):
+            with gzip.open(qc / f"A_clean_R{mate}.fastq.gz", "wt") as fh:
+                fh.write("@r1\nACGT\n+\nIIII\n")
+        self.assertTrue(state.validate_stage(r, "01_qc", ["A"]).ok)
+
+    def test_missing_stage_outputs_fail(self):
+        from metaglens import state
+        r = self._results()
+        for step in ("05_checkm", "06_derep", "07_taxonomy", "10_community"):
+            self.assertFalse(state.validate_stage(r, step).ok, step)
+
+    def test_unknown_stage_passes_vacuously(self):
+        from metaglens import state
+        report = state.validate_stage(self._results(), "no_such_stage")
+        self.assertTrue(report.ok)
+
+    def test_report_is_json_serialisable(self):
+        from metaglens import state
+        r = self._results()
+        payload = state.validate_stage(r, "00_setup").as_dict()
+        self.assertEqual(json.loads(json.dumps(payload))["stage"], "00_setup")
+
+    # -- demotion: the shell said completed, products say otherwise -------- #
+    def test_run_step_demotes_stage_when_products_invalid(self):
+        cfg = self.make_cfg()
+        results = cfg.results_dir
+        results.mkdir(parents=True, exist_ok=True)
+        (results / "samples.tsv").write_text(
+            "sample_id\tr1\tr2\nA\t/x/1\t/x/2\n", encoding="utf-8")
+        (results / "pipeline_status.json").write_text(json.dumps({
+            "steps": {"10_community": {"status": "pending", "attempts": 0}}}),
+            encoding="utf-8")
+        # A script that claims success and writes a header-only matrix.
+        script = results / routes.STEPS["10_community"].script
+        out = results / "10_community"
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            f"mkdir -p '{out}'\n"
+            f"printf 'taxon\\tA\\n' > '{out}/community_matrix.tsv'\n"
+            "python3 - <<'PY'\n"
+            "import json\n"
+            f"p='{results}/pipeline_status.json'\n"
+            "d=json.load(open(p))\n"
+            "d['steps']['10_community']['status']='completed'\n"
+            "json.dump(d, open(p,'w'))\n"
+            "PY\n"
+            "exit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+
+        rc = pipeline.run_step(cfg, "10_community")
+        self.assertNotEqual(rc, 0, "a stage with unusable products must not pass")
+        self.assertEqual(pipeline.step_status(cfg, "10_community"), "failed")
+        data = pipeline.read_status(cfg)
+        pv = data["steps"]["10_community"]["product_validation"]
+        self.assertFalse(pv["ok"])
+        self.assertTrue(pv["failures"])
+
+    def test_run_step_accepts_valid_products(self):
+        cfg = self.make_cfg()
+        results = cfg.results_dir
+        results.mkdir(parents=True, exist_ok=True)
+        (results / "samples.tsv").write_text(
+            "sample_id\tr1\tr2\nA\t/x/1\t/x/2\n", encoding="utf-8")
+        (results / "pipeline_status.json").write_text(json.dumps({
+            "steps": {"10_community": {"status": "pending", "attempts": 0}}}),
+            encoding="utf-8")
+        script = results / routes.STEPS["10_community"].script
+        out = results / "10_community"
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            f"mkdir -p '{out}'\n"
+            f"printf 'taxon\\tA\\ns__Foo\\t9\\n' > '{out}/community_matrix.tsv'\n"
+            "python3 - <<'PY'\n"
+            "import json\n"
+            f"p='{results}/pipeline_status.json'\n"
+            "d=json.load(open(p))\n"
+            "d['steps']['10_community']['status']='completed'\n"
+            "json.dump(d, open(p,'w'))\n"
+            "PY\n"
+            "exit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+        self.assertEqual(pipeline.run_step(cfg, "10_community"), 0)
+        self.assertEqual(pipeline.step_status(cfg, "10_community"), "completed")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

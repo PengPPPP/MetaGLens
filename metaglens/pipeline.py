@@ -97,13 +97,65 @@ def first_incomplete_step(cfg: Config) -> Optional[str]:
 # --------------------------------------------------------------------------- #
 # Execution
 # --------------------------------------------------------------------------- #
-def run_step(cfg: Config, step_id: str) -> int:
-    """Execute one stage script from the results dir; returns its exit code."""
+def write_step_status(cfg: Config, step_id: str, status: str,
+                      extra: Optional[Dict] = None) -> None:
+    """Patch one step's status in ``pipeline_status.json`` (best effort)."""
+    path = status_file_path(cfg)
+    if not path.is_file():
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return
+    step = data.setdefault("steps", {}).setdefault(step_id, {})
+    step["status"] = status
+    if extra:
+        step.update(extra)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def validate_step_products(cfg: Config, step_id: str):
+    """Semantic product validation for one stage (see :mod:`metaglens.state`)."""
+    from . import state
+    return state.validate_stage(cfg.results_dir, step_id)
+
+
+def run_step(cfg: Config, step_id: str, validate_products: bool = True) -> int:
+    """Execute one stage script from the results dir; returns its exit code.
+
+    When the script reports success, its **products** are re-checked before the
+    result is accepted. A stage that exits 0 while producing nothing usable is
+    demoted back to ``failed`` — the pipeline must never treat a header-only
+    table as a result (see metaglens.state).
+    """
     script = cfg.results_dir / routes.STEPS[step_id].script
     if not script.is_file():
         raise PipelineError(f"Script not found (run materialize first): {script}")
     proc = subprocess.run(["bash", str(script)], cwd=str(cfg.results_dir))
-    return proc.returncode
+    rc = proc.returncode
+
+    if rc == 0 and validate_products and step_status(cfg, step_id) == "completed":
+        report = validate_step_products(cfg, step_id)
+        if not report.ok:
+            reasons = report.failures
+            write_step_status(cfg, step_id, "failed", {
+                "product_validation": {"ok": False, "failures": reasons},
+            })
+            print(f"[metaglens] {step_id}: the script reported success but its "
+                  f"products did not pass validation:")
+            for reason in reasons:
+                print(f"[metaglens]   - {reason}")
+            return 1
+        write_step_status(cfg, step_id, "completed", {
+            "product_validation": {"ok": True,
+                                   "checks": len(report.checks)},
+        })
+    return rc
 
 
 def select_steps(cfg: Config, only: Optional[List[str]] = None,

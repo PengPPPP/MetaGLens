@@ -130,8 +130,19 @@ def run_demo(route: str = "mag_per_sample", workdir: Optional[str] = None,
                 capture_output=not verbose, text=True, timeout=600,
             )
             status = pipeline.step_status(cfg, step_id)
+
+            # Re-check products through the production validator, so the demo
+            # exercises the same contract a real run enforces.
+            validation = None
+            if proc.returncode == 0 and status == "completed":
+                report = pipeline.validate_step_products(cfg, step_id)
+                validation = {"ok": report.ok, "failures": report.failures}
+                if not report.ok:
+                    status = "failed"
+
             result["stages"].append({
                 "step": step_id, "exit_code": proc.returncode, "status": status,
+                "validation": validation,
             })
             if proc.returncode != 0 or status != "completed":
                 tail = ""
@@ -139,6 +150,8 @@ def run_demo(route: str = "mag_per_sample", workdir: Optional[str] = None,
                     tail = "\n".join(proc.stdout.strip().splitlines()[-25:])
                 if not verbose and proc.stderr:
                     tail += "\n" + "\n".join(proc.stderr.strip().splitlines()[-25:])
+                if validation and not validation["ok"]:
+                    tail += "\nproduct validation: " + "; ".join(validation["failures"])
                 result["errors"].append(
                     f"{step_id}: exit {proc.returncode}, status '{status}'\n{tail}"
                 )
