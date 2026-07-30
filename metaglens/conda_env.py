@@ -33,7 +33,8 @@ from typing import Dict, List, Optional, Sequence
 PIPELINE_TOOLS: List[str] = [
     "fastp", "megahit", "spades", "bowtie2", "bwa-mem2", "samtools", "seqkit",
     "metabat2", "maxbin2", "concoct", "das_tool",
-    "checkm2", "drep", "gtdbtk", "kraken2", "bracken", "prokka", "eggnog-mapper",
+    "checkm2", "drep", "gtdbtk", "kraken2", "bracken", "prokka", "prodigal",
+    "eggnog-mapper",
 ]
 
 # Distribution directory names to probe under $HOME and /opt, in order.

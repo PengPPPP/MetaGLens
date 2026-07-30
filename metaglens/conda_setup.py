@@ -15,11 +15,15 @@ from typing import Dict, List, Tuple
 from .conda_env import find_conda
 
 # Stage-grouped conda package names. Mirrors the grouping used by 00_setup.sh,
-# plus bwa-mem2 so the alternative aligner is available when selected.
+# plus bwa-mem2 so the alternative aligner is available when selected, and
+# prodigal, which 09_contig_analysis.sh calls directly for gene prediction (and
+# 08_annotation.sh calls when Prokka is disabled) but which was missing from
+# every group, leaving contig routes with a requirement nothing could install.
 ENV_GROUPS: Dict[str, List[str]] = {
     "qc": ["fastp", "megahit", "spades", "bowtie2", "bwa-mem2", "samtools", "seqkit"],
     "binning": ["metabat2", "maxbin2", "concoct", "das_tool"],
-    "mag": ["checkm2", "drep", "gtdbtk", "kraken2", "bracken", "prokka", "eggnog-mapper"],
+    "mag": ["checkm2", "drep", "gtdbtk", "kraken2", "bracken", "prokka",
+            "prodigal", "eggnog-mapper"],
 }
 
 CHANNELS = ["-c", "conda-forge", "-c", "bioconda"]

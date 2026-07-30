@@ -1497,5 +1497,59 @@ class TestExecutionPlan(TempDirCase):
         self.assertFalse(data["ok"])
 
 
+class TestToolchainInstallability(TempDirCase):
+    """Phase 9.A: nothing may be required that no env group can install."""
+
+    def _all_group_tools(self) -> set:
+        return {tool for group in conda_setup.ENV_GROUPS.values() for tool in group}
+
+    def test_every_required_tool_is_installable(self):
+        """The general guard: required_tools ⊆ union(ENV_GROUPS).
+
+        This is what makes the prodigal class of bug impossible to reintroduce —
+        a tool the templates invoke but no group ships would be caught here.
+        """
+        from metaglens.sense import tools
+        provided = self._all_group_tools()
+        for route in routes.ROUTES:
+            for switches in (
+                {},
+                {"contig_taxonomy": "kraken2"},
+                {"taxonomy_tool": "kraken2", "use_bracken": True},
+                {"assembler": "metaspades", "align_tool": "bwa-mem2"},
+                {"use_prokka": False},
+                {"remove_host": True, "host_genome": "/tmp/h.fa"},
+            ):
+                cfg = self.make_cfg(route_name=route, **switches)
+                required = set(tools.required_tools(cfg))
+                missing = required - provided
+                self.assertEqual(
+                    missing, set(),
+                    f"{route} {switches}: required but no ENV_GROUP provides {missing}")
+
+    def test_known_tools_are_all_installable(self):
+        from metaglens.sense import tools
+        unprovided = set(tools.all_known_tools()) - self._all_group_tools()
+        self.assertEqual(unprovided, set(),
+                         f"tools with no installing group: {unprovided}")
+
+    def test_prodigal_shipped_in_mag_group_and_pipeline_tools(self):
+        self.assertIn("prodigal", conda_setup.ENV_GROUPS["mag"])
+        self.assertIn("prodigal", conda_env.PIPELINE_TOOLS)
+
+    def test_setup_env_mag_command_includes_prodigal(self):
+        plan = conda_setup.build_commands("proj", ["mag"], single=False)
+        env_name, argv = plan[0]
+        self.assertEqual(env_name, "proj_mag")
+        self.assertIn("prodigal", argv)
+
+    def test_contig_route_has_no_uninstallable_requirement(self):
+        from metaglens.sense import tools
+        cfg = self.make_cfg(route_name="contig_based", contig_taxonomy="kraken2")
+        required = set(tools.required_tools(cfg))
+        self.assertIn("prodigal", required)          # 09_contig calls it
+        self.assertLessEqual(required, self._all_group_tools())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
