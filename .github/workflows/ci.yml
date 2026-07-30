@@ -49,6 +49,28 @@ jobs:
       - name: Offline end-to-end self-check (stub toolchain)
         run: python -m metaglens.demo
 
+      - name: Rules and knowledge files load and are well formed
+        # The externalised YAML is load-bearing: gates, failure signatures,
+        # advice and the explain knowledge base all live there, so a malformed
+        # file must fail CI rather than silently disable a feature.
+        run: |
+          python - <<'PY'
+          from metaglens.decide import gates, diagnose, advisor
+          from metaglens.express import explain
+
+          assert gates.load_rules(), "gates.yaml did not load"
+          failures = diagnose.load_rules()
+          assert len(failures) >= 10, f"only {len(failures)} failure rules"
+          assert advisor.load_rules(), "advice.yaml did not load"
+          topics = explain.topics()
+          assert len(topics) >= 25, f"only {len(topics)} explain topics"
+
+          for rule in failures:
+              for key in ("id", "match", "class", "title", "actions"):
+                  assert key in rule, f"{rule.get('id')} missing {key}"
+          print(f"rules OK: {len(failures)} failures, {len(topics)} topics")
+          PY
+
   package:
     runs-on: ubuntu-latest
     steps:

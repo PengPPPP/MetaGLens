@@ -343,26 +343,26 @@ POST 回写 `metaglens.yaml`。
 **为什么排最前**:设计稿 §4.4 直接称此为「当前最实质的可靠性缺口」——Python 侧只读
 shell 写的状态标志位,**从不复核产物**。§7-8 就是活例子(空表 + exit 0 + 标 completed)。
 
-- [ ] 10.1 `metaglens/state.py`:**语义级**产物验证。注意设计稿的明确警告——不能停在
+- [x] 10.1 `metaglens/state.py`:**语义级**产物验证。注意设计稿的明确警告——不能停在
   「文件存在且非空」,**表头本身就让文件非空**。每阶段写明可判定下界,至少:
   `01_qc` 每样本 clean R1/R2 存在且 > 0;`02_assembly` contigs ≥ 1 条序列;
   `03_mapping` 每样本 BAM + depth 非空;`04_binning` all_bins ≥ 1 个 FASTA;
   `05_checkm` `quality_report.tsv` ≥ 1 个 bin 数据行;`06_derep` `dereplicated_genomes/` ≥ 1 FASTA;
   `07_taxonomy` summary ≥ 1 数据行;`08_annotation` 每 MAG 至少一份注释;
   `09_contig` 蛋白/GFF 非空;`10_community` matrix ≥ 1 数据行;`11_delivery` 关键交付物齐全。
-- [ ] 10.2 **接入**:阶段脚本标 completed **之后**,Python 侧(`pipeline.run_step`)复核产物;
+- [x] 10.2 **接入**:阶段脚本标 completed **之后**,Python 侧(`pipeline.run_step`)复核产物;
   不通过则把该阶段改回 `failed` 并写明原因,`run` 中止。**即使 shell 说成功也不放过。**
-- [ ] 10.3 `metaglens/decide/rules/gates.yaml` + `decide/gates.py`:软门禁(科学指标)。
+- [x] 10.3 `metaglens/decide/rules/gates.yaml` + `decide/gates.py`:软门禁(科学指标)。
   按设计稿:`01_qc` retention_rate(warn<70 / block<40)、`04_binning` bins_per_sample(warn<1)、
   `05_checkm` mimag_hq_count(warn<1,≥90%完整/≤5%污染)。**规则外置 YAML**(原则 3),
   每条带 `id` 与 `hint`(人话解释常见原因)。
-- [ ] 10.4 `metaglens gate [--stage ID] [--strict] [--json]`:默认 warn 只提示;
+- [x] 10.4 `metaglens gate [--stage ID] [--strict] [--json]`:默认 warn 只提示;
   `--strict-gates` 时 warn 也阻断。结果写入 `pipeline_status.json.gates`。
-- [ ] 10.5 `run` 增 `--strict-gates`;report.html 增 **Gates 标签页**(复用 `_theme`)。
-- [ ] 10.6 测试:每阶段产物验证的正反例;**"表头非空但零数据行必须判失败"**;
+- [x] 10.5 `run` 增 `--strict-gates`;report.html 增 **Gates 标签页**(复用 `_theme`)。
+- [x] 10.6 测试:每阶段产物验证的正反例;**"表头非空但零数据行必须判失败"**;
   软门禁三档(pass/warn/block);`--strict-gates` 行为差异;`--json` 可解析。
   **并且:用 `demo` 端到端验证门禁真的会拦**(参考我用注回 bug 的方式自证有牙齿)。
-- [ ] 10.7 commits:`feat(state): semantic product validation`、`feat(decide): quality gates`、
+- [x] 10.7 commits:`feat(state): semantic product validation`、`feat(decide): quality gates`、
   `feat(cli): gate command & --strict-gates`。
 
 ---
@@ -371,42 +371,42 @@ shell 写的状态标志位,**从不复核产物**。§7-8 就是活例子(空�
 
 设计稿 §4.5。现状失败只有一行 `exit N. Check reports/logs/.`。
 
-- [ ] 11.1 `decide/rules/failures.yaml`(**外置规则**,每条带 `id`/`match`/`class`/`title`/
+- [x] 11.1 `decide/rules/failures.yaml`(**外置规则**,每条带 `id`/`match`/`class`/`title`/
   `diagnosis`/`actions`)。三类归因:`script_defect` / `environment` / `data_config`。
   至少覆盖:OOM(exit 137)、数据库未配置(GTDB-Tk/CheckM2/Kraken2/eggNOG 各自特征)、
   通配符未匹配(上游空产出)、磁盘满、命令未找到(工具缺失)、权限拒绝、
   scheduler 相关(如适用)。
-- [ ] 11.2 `diagnose.py`:输入 = 退出码 + 日志尾 + 阶段 + `pipeline_status.json.last_failure`;
+- [x] 11.2 `diagnose.py`:输入 = 退出码 + 日志尾 + 阶段 + `pipeline_status.json.last_failure`;
   输出 = 归因(类别/标题/证据行/建议动作)。匹配失败要**优雅降级**为"未知失败 + 日志位置",
   绝不硬编造原因。
-- [ ] 11.3 **错误信息三段式**(设计稿 §5.3):全局统一为 发生了什么 / 为什么 / 下一步敲什么命令。
+- [x] 11.3 **错误信息三段式**(设计稿 §5.3):全局统一为 发生了什么 / 为什么 / 下一步敲什么命令。
   `cli._fail()` 现在只给第一段,升级它并在失败路径接入 diagnose。
-- [ ] 11.4 `metaglens diagnose [--stage ID] [--json]`;`run` 失败时自动打印归因。
-- [ ] 11.5 测试:各特征规则命中(用构造日志);未知失败的降级;三段式包含可执行命令。
-- [ ] 11.6 commits:`feat(decide): failure diagnosis rules`、`feat(cli): three-part error reporting`。
+- [x] 11.4 `metaglens diagnose [--stage ID] [--json]`;`run` 失败时自动打印归因。
+- [x] 11.5 测试:各特征规则命中(用构造日志);未知失败的降级;三段式包含可执行命令。
+- [x] 11.6 commits:`feat(decide): failure diagnosis rules`、`feat(cli): three-part error reporting`。
 
 ---
 
 ## Phase 12 — 交互打磨(拼写纠错 / profile / i18n / explain)
 
-- [ ] 12.1 **拼写纠错**(§5.3):`difflib.get_close_matches` 用于 `--only`/`--from` 步骤名、
+- [x] 12.1 **拼写纠错**(§5.3):`difflib.get_close_matches` 用于 `--only`/`--from` 步骤名、
   route 名、以及 `Config.from_yaml` 的未知键(现在直接抛异常、不给建议)。
   提示形如「未知步骤 '04_bining';你是不是想输入 '04_binning'?」。
-- [ ] 12.2 **用户级 profile**(§5.3):`~/.config/metaglens/profile.yaml` 记住上次的
+- [x] 12.2 **用户级 profile**(§5.3):`~/.config/metaglens/profile.yaml` 记住上次的
   `total_threads`/`db_dir`/`conda_env`/`lang`,下次作默认。**读失败要静默降级**;
   遵循 `XDG_CONFIG_HOME`。**profile 只提供默认值,绝不覆盖显式配置。**
-- [ ] 12.3 **`express/i18n.py`**:交互层 `--lang zh|en` 覆盖终端输出(向导/doctor/plan/gate/
+- [x] 12.3 **`express/i18n.py`**:交互层 `--lang zh|en` 覆盖终端输出(向导/doctor/plan/gate/
   diagnose 的提示语)。**交付物(run_log/methods/report)保持英文**(原则 8)。
   与 Phase 4 网页的 i18n 共用文案表(能共用则共用,不强求)。
-- [ ] 12.4 **`express/explain.py` + `metaglens explain <topic>`**(§5.3):把 skill 的领域知识
+- [x] 12.4 **`express/explain.py` + `metaglens explain <topic>`**(§5.3):把 skill 的领域知识
   资产化成**离线可查知识库**。至少覆盖:12 个阶段各自在干什么 + 常见坑;
   关键科学参数(`completeness_min`/`contamination_max` 与 MIMAG 标准、`ani_threshold`、
   `min_contig_len`、`min_length`、`quality_threshold`)的科学含义与取舍;
   Phase 11 的失败 id(如 `oom.killed`)。知识放 YAML/Markdown 数据文件,**不硬编码在 py 里**。
-- [ ] 12.5 `--json` 全覆盖补齐(§5.3):`status`/`validate` 若还缺则补上。
-- [ ] 12.6 测试:纠错建议正确;profile 读写与降级、不覆盖显式值;`explain` 各主题有内容且
+- [x] 12.5 `--json` 全覆盖补齐(§5.3):`status`/`validate` 若还缺则补上。
+- [x] 12.6 测试:纠错建议正确;profile 读写与降级、不覆盖显式值;`explain` 各主题有内容且
   找不到时给候选;i18n 切换不影响交付物语言。
-- [ ] 12.7 commits 分开提(纠错 / profile / i18n / explain)。
+- [x] 12.7 commits 分开提(纠错 / profile / i18n / explain)。
 
 ---
 
@@ -414,19 +414,19 @@ shell 写的状态标志位,**从不复核产物**。§7-8 就是活例子(空�
 
 设计稿 §5.2。**注意:Phase 6 的 monitor.html 已覆盖"网页看"这一半,本阶段做终端那一半。**
 
-- [ ] 13.1 `observe/resources.py`:采样 CPU/RSS/磁盘增量(stdlib 优先,psutil 可选增强)。
-- [ ] 13.2 `observe/progress/`:每工具一个解析器(fastp 样本计数、MEGAHIT 的 `k=` 行、
+- [x] 13.1 `observe/resources.py`:采样 CPU/RSS/磁盘增量(stdlib 优先,psutil 可选增强)。
+- [x] 13.2 `observe/progress/`:每工具一个解析器(fastp 样本计数、MEGAHIT 的 `k=` 行、
   bowtie2 百分比、prokka/GTDB-Tk 分片计数)。**解析失败必须优雅降级**为不定进度 +
   日志 mtime 心跳——设计稿明确警示「quiet log 不代表卡死」,组装器可几十分钟无输出,
   **不得因此误判为挂死**。
-- [ ] 13.3 `express/dashboard.py`:Rich Live 多面板(阶段进度条 + 每样本状态 + 资源 + 日志尾)。
-- [ ] 13.4 `metaglens run --monitor` 与 `metaglens watch`(独立进程附着,读 status + log tail,
+- [x] 13.3 `express/dashboard.py`:Rich Live 多面板(阶段进度条 + 每样本状态 + 资源 + 日志尾)。
+- [x] 13.4 `metaglens run --monitor` 与 `metaglens watch`(独立进程附着,读 status + log tail,
   适配 tmux 里跑、另一窗口看)。**`q` 只退出监控界面,绝不杀进程**——设计稿点名此语义
   必须做对,否则用户会误杀几小时的活。
-- [ ] 13.5 监控页(Phase 6)与终端仪表盘**共用** `observe/` 采集层,避免两套逻辑漂移。
-- [ ] 13.6 测试:各解析器对样本日志的解析;**无法解析时降级为心跳而非报错**;
+- [x] 13.5 监控页(Phase 6)与终端仪表盘**共用** `observe/` 采集层,避免两套逻辑漂移。
+- [x] 13.6 测试:各解析器对样本日志的解析;**无法解析时降级为心跳而非报错**;
   `watch` 在无运行时给出友好提示。资源采样在 psutil 缺失时仍可用。
-- [ ] 13.7 commits:`feat(observe): resource sampling & progress parsers`、
+- [x] 13.7 commits:`feat(observe): resource sampling & progress parsers`、
   `feat(express): live terminal dashboard`、`feat(cli): run --monitor & watch`。
 
 ---
@@ -436,38 +436,38 @@ shell 写的状态标志位,**从不复核产物**。§7-8 就是活例子(空�
 **顺序要求**:`repair` 必须最后做——设计稿 §8 明确「自愈价值高但风险也高,必须等
 diagnose 归因准确率验证过再上,否则会自动地做错事」。
 
-- [ ] 14.1 `decide/rules/advice.yaml` + `advisor.py`(§4.2):规则外置,**每条建议必须带
+- [x] 14.1 `decide/rules/advice.yaml` + `advisor.py`(§4.2):规则外置,**每条建议必须带
   理由与严重度**。至少含设计稿给的两例:metaSPAdes 在小内存 + 大数据量下建议换 MEGAHIT;
   `threads_per_job < 4` 时组装器 I/O 争用告警。
-- [ ] 14.2 `metaglens recommend [--apply] [--explain]`:输出「当前值 vs 建议值 + 理由」。
+- [x] 14.2 `metaglens recommend [--apply] [--explain]`:输出「当前值 vs 建议值 + 理由」。
   `--apply` **必须先展示 YAML diff 并确认**;**推荐引擎永不静默改配置**(原则 4)。
   **科学参数只提示不自动改**(原则 5)。
-- [ ] 14.3 `express/methods.py`(§5.4,低优先但要做对一件事——**版本号必须真实**):
+- [x] 14.3 `express/methods.py`(§5.4,低优先但要做对一件事——**版本号必须真实**):
   只写**实际执行**的阶段(读 status 的 selected_steps + completed),用
   `reports/tool_versions.txt` 的真实版本,缺失时标 `[provisional]`;过去时;
   不提没跑的分支。`metaglens methods` 改为由 Python 生成而非单纯 cat。
-- [ ] 14.4 `decide/repair.py`(§4.6,**安全边界不可协商**):
+- [x] 14.4 `decide/repair.py`(§4.6,**安全边界不可协商**):
   上限 2 次(`--auto-repair N`,`0` 关闭);**只允许**降并发/降线程/加内存请求/重试瞬时错误;
   **禁止**改任何科学参数、改输入、动环境、动数据库、删非空产物;
   每次尝试前保存脚本快照到 `reports/repairs/{stage}/attempt-N/`;
   每次追加 JSON 到 `reports/repair_log.jsonl`(诊断/改动/验证命令/结果);
   **同一失败特征重复出现即停**,绝不无界循环;只重跑失败阶段,不碰上游。
-- [ ] 14.5 `run --auto-repair N`(**默认 0 即关闭**,需用户显式开启)。
-- [ ] 14.6 测试:advisor 规则命中与理由输出;`--apply` 未确认时不写文件;
+- [x] 14.5 `run --auto-repair N`(**默认 0 即关闭**,需用户显式开启)。
+- [x] 14.6 测试:advisor 规则命中与理由输出;`--apply` 未确认时不写文件;
   methods 只含已执行阶段且版本来自 tool_versions;
   **repair 的白名单必须有反例断言**——尝试修改科学参数时必须被拒绝;
   两次失败即停;repair_log.jsonl 证据完整。
   用 `demo` 注入一次可修复失败(如伪造 exit 137)验证降并发重跑成功。
-- [ ] 14.7 commits 分开提(advisor / recommend / methods / repair)。
+- [x] 14.7 commits 分开提(advisor / recommend / methods / repair)。
 
 ---
 
 ## 收尾要求(Phase 10–14 全部完成后)
 
-- [ ] 15.1 `README` 补齐所有新命令;`docs/IMPL-PLAN-webconfig.md` 勾选与完成备注齐全。
-- [ ] 15.2 全量门禁:`unittest` 全绿、`bash -n` 全模板、`python3 -m metaglens.demo` 两路由 PASS、
+- [x] 15.1 `README` 补齐所有新命令;`docs/IMPL-PLAN-webconfig.md` 勾选与完成备注齐全。
+- [x] 15.2 全量门禁:`unittest` 全绿、`bash -n` 全模板、`python3 -m metaglens.demo` 两路由 PASS、
   `compileall` 干净、CI 配置涵盖新命令。
-- [ ] 15.3 汇报总清单(各 Phase commit 哈希 + 关键验证输出),等 IDE 会话审查。
+- [x] 15.3 汇报总清单(各 Phase commit 哈希 + 关键验证输出),等 IDE 会话审查。
 
 ---
 
@@ -704,3 +704,84 @@ mag_per_sample 的 report.html payload: qc=2 行 / mags=4 / taxa=1 / timeline=12
 ```
 
 **打包**：`pyproject` 补 `metaglens.demo` 子包（否则 wheel 装不到 demo）。
+
+
+### Phase 10 — 产物验证 + 质量门禁（commit `36d5947` + `acc8d40`）
+
+- `metaglens/state.py`：**语义级**验证，13 个阶段各写明可判定下界。核心是不停在"文件非空"——
+  表头本身就让文件非空（§7-8 就是这么漏过去的）：`table_has_rows` 排除表头与注释后要求 ≥1 数据行、
+  `fasta_has_records` 数 `>`、`gzip_has_reads` 检查真有 FASTQ 记录。
+- `pipeline.run_step`：脚本报成功后**复核产物**，不通过则改回 `failed` 并记 `product_validation`，
+  返回非零。demo 也改为复用同一验证器，避免两套契约漂移。
+- `decide/gates.py` + `rules/gates.yaml`：6 条软门禁（retention/bins/MIMAG HQ/retained/reps/taxa），
+  每条带 `id` 与人话 `hint`。默认 warn 不阻断，`block_*` 才独立阻断，`--strict` 提升 warn；
+  指标算不出来记 `unknown` 而非失败（contig 路线不会因没有 CheckM2 被误判）。
+- `metaglens gate [--stage] [--strict] [--json]`、`run --strict-gates`、report 新增 **Gates 标签页**（复用 `_theme`）。
+- **实测**：真实 demo 产物 19 项验证全通过、6/6 门禁 pass 无误报；把 community matrix 截成只剩表头
+  （18 字节，非空）→ 正确判失败；QC 保留率改 30% + CheckM2 改 55/18 → `block qc.retention_rate` + MIMAG 警告。
+- 测试 +19（166→…）。
+
+### Phase 11 — 失败归因（commit `5ccff44`）
+
+- `rules/failures.yaml` 13 条（三类归因）：OOM 按退出码与按日志、四个数据库各自特征、磁盘满、
+  空 glob、命令缺失、权限、缺输入、缺状态、调度器超时。
+- `diagnose.py`：产物验证失败优先（原因已精确已知），否则按序匹配；**匹配不到时明确降级**为
+  "未知失败 + 证据 + 日志位置"，有测试断言未知路径**不出现** memory/database/disk/permission 任一词。
+- `cli._fail3` / `_print_diagnosis` 三段式（发生什么 / 为什么 / 下一步可复制命令）；
+  `metaglens diagnose`；`run` 失败自动归因。
+- **顺带修真实缺陷**：`from .diagnose import diagnose` 让函数覆盖同名子模块，导致
+  `from metaglens.decide import diagnose` 拿到函数、属性访问全部报错（17 个测试暴露）。改为先导入子模块、
+  函数另名 `diagnose_failure`。
+- 调试中还修了 `glob.unmatched` 正则（真实消息里 `*` 在引号内）与规则优先级（glob 需在 tool 之前）。
+
+### Phase 12 — 交互打磨（commit `ef147a0` + `85e0f47` + `54d0f0b` + `8ceb702`）
+
+- `express/suggest.py`：difflib + 子串兜底。接入 `--only`/`--from`、route 名、`from_yaml` 未知键、
+  `validate` 的 route/custom_steps。`routes.py` 用 difflib 直调以免循环依赖。
+  实测 `04_bining→04_binning`、`taxonomy→07_taxonomy`、纯乱码不给假建议。
+- `express/profile.py`：XDG 路径，只记 5 个机器级键；**只填空不覆盖**（`defaults_for` 跳过显式值）；
+  损坏文件静默降级为空。
+- `express/i18n.py`：交互层 en/zh，**交付物保持英文**（有测试：切 zh 后报告仍是英文 chrome）；
+  缺翻译降级到 en 再到 key；有测试断言 en 的每个键都有 zh。
+- `express/explain.py` + `knowledge/topics.yaml`：**30 个主题**（12 阶段 + 科学参数 + 失败 id + MIMAG），
+  知识在**数据文件**非代码；查找支持精确/大小写/前缀，未命中给候选。
+- 补 `status`/`validate` 的 `--json`；全局 `--lang`；`pyproject` 补 package-data 让 YAML 进 wheel。
+
+### Phase 13 — 运行时可观测（commit `93032d2` + `efb3cc3` + `d4788a8`）
+
+- `observe/resources.py`：`/proc/meminfo` + `disk_usage` + load average（标注为近似），
+  目录遍历有上限防卡 UI；psutil 仅可选（有测试强制 import 失败仍可用）。
+- `observe/progress.py`：**对着真实日志**写解析器，因此抓到两处自己的错误——宽松的完成正则把
+  `sequences:` 当成单元名；`08_annotation` 只记起始行不记逐个完成，需要"起始数-1"兜底。
+  解析失败降级为不定进度 + 工具提示（MEGAHIT `k=`、bowtie2 对齐率）。
+  **静默措辞刻意不含 stalled/hung 即使是否定式**——扫读者只会看到那个惊悚词，不会看到 "not"。
+- `observe/monitor.collect` 升级为**唯一采集层**，HTML 页与终端仪表盘同源（13.5）。
+- `express/dashboard.py` + `metaglens watch` + `run --monitor`：**watch 严格只读**，
+  有测试断言 watch 前后 `pipeline_status.json` 逐字节一致。
+
+### Phase 14 — advisor + methods + repair（commit `7027197` + `47733cd` + `4119713` + `4ba9d2d`）
+
+- `advisor.py` + `rules/advice.yaml`：8 条规则，**每条带理由与严重度**；含设计稿点名的两例。
+  **科学参数只警告**：`scope: science` 无 advise 载荷，且 `applicable_changes` 再按
+  `APPLICABLE_FIELDS`/`SCIENTIFIC_FIELDS` 双重过滤（测试断言只有科学规则命中时可写集合为空）。
+  表达式求值改为**白名单 AST 走查**而非 `eval`（规则文件用户可编辑，eval 等于给它代码执行权）。
+- `express/methods.py`：只写实际 completed 的阶段、版本取自 `tool_versions.txt`、
+  缺失标 `[provisional]`。**修真实缺陷**：无版本号的行原样当版本 → 会打出
+  `v[stub] fastp --version`，现判为未记录。
+- `decide/repair.py`：白名单 4 个操作 / 3 个可写字段，`FORBIDDEN_FIELDS` 显式列出所有科学/输入/
+  数据库/路由参数使拒绝可审计；上限 2 次；同特征即停；每次留脚本快照 +
+  `repair_log.jsonl` 一行（含拒绝）；只重跑失败阶段。
+- **反例测试齐全**：试改 `completeness_min`/`contamination_max`/`ani_threshold`/`min_contig_len`/
+  `kmer_list`/`assembler` 全部抛 `RepairRefused`；未知操作、输入/数据库字段同样被拒。
+- **端到端实测**：exit 137 → 归因 `oom.killed` → 并发 4→2 → 阶段恢复 → 证据完整 →
+  `completeness_min`/`ani_threshold`/`assembler` 均未改动。
+
+### Phase 15 — 收尾
+
+- `README`：Quick start 补 6 个新命令；新增「Reliability: validation, gates, diagnosis」
+  「Watching a run」「Recommendations and bounded repair」三节，写明语义级验证的理由、
+  watch 只读语义、科学参数不自动改的边界。
+- CI 新增「rules 与知识文件加载且格式正确」步骤——外置 YAML 是承重件，畸形文件必须让 CI 红
+  而不是静默停用某个功能。
+- **全量门禁**：`unittest` **248** 全绿（177→248，+71）；`bash -n` 全 14 模板 OK；
+  `compileall` 干净；`python3 -m metaglens.demo` 两路由 PASS；wheel 67 文件、18 个必需路径齐全。

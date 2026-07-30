@@ -42,11 +42,16 @@ metaglens run --dry-run        # render + bash -n, without executing
 metaglens run                  # materialize and execute the whole route
 metaglens run --from 04_binning  # run from a specific stage onward
 metaglens run --only 07_taxonomy # run only the named stage(s), comma-separated
+metaglens recommend            # resource suggestions for this machine, with reasons
 metaglens status               # show stage progress
+metaglens watch                # live terminal dashboard (read-only)
 metaglens monitor              # write a self-refreshing monitor.html (open via file://)
+metaglens gate                 # check scientific quality metrics
+metaglens diagnose             # explain why a stage failed
+metaglens explain <topic>      # what a stage/parameter/failure means
 metaglens resume               # continue from the first incomplete stage
 metaglens report               # (re)build delivery/report.html
-metaglens methods              # print the generated Methods text
+metaglens methods              # Methods text for the stages that actually ran
 metaglens routes               # list routes and their steps
 metaglens setup-env            # one-shot conda environment creation
 ```
@@ -253,6 +258,77 @@ aligner, binner toggles, CheckM2 completeness/contamination cut-offs, ANI,
 taxonomy tool, Prokka kingdom, eggNOG/CheckM2/GTDB/Kraken2 database paths, topN
 community levels, tarball) all have sensible defaults and can be overridden in
 the same file.
+
+## Reliability: validation, gates, diagnosis
+
+Two independent checks stand between a stage "finishing" and its result being
+trusted.
+
+**Product validation** is semantic, not "the file exists". A header line alone
+makes a file non-empty, which is exactly how an empty community table once
+passed as a success — so every stage declares a decidable lower bound (at least
+one data row, at least one FASTA record, actual reads inside the gzip). If a
+script exits 0 but its products do not hold up, the stage is put back to
+`failed` and the run stops. The shell's own verdict is not the last word.
+
+**Quality gates** ask the next question — do the numbers look plausible:
+
+```bash
+metaglens gate                 # QC retention, bins/sample, MIMAG-quality MAGs...
+metaglens gate --strict        # treat warnings as errors
+metaglens run --strict-gates   # same, during a run
+```
+
+Gates warn by default, because a low-but-explicable metric is a reason to look
+rather than to abort; only genuinely meaningless values block on their own. Each
+gate carries a plain-language hint about the usual causes. Thresholds live in
+`metaglens/decide/rules/gates.yaml` and can be tuned without touching Python.
+
+**Diagnosis** turns a failure into something actionable:
+
+```bash
+metaglens diagnose             # what failed, why, what to run next
+metaglens explain oom.killed   # background on a specific failure
+```
+
+`exit 137` becomes "killed by the OOM killer", with the evidence line, the log
+path, and the commands to try. When no known signature matches, it says so and
+hands over the evidence — it never invents a cause, because a confident wrong
+answer costs more than an honest "unknown".
+
+## Watching a run
+
+```bash
+metaglens watch                # live terminal dashboard
+metaglens run --monitor        # also keep monitor.html updated
+```
+
+Both views read one collection layer, so they cannot disagree. **Leaving the
+view never touches the run** — `watch` attaches read-only, and a quiet stage is
+reported with its heartbeat ("no output for 12m — normal for assemblers"), never
+as a stalled one. Assemblers legitimately run silently for tens of minutes;
+mistaking that for a hang is how people kill twelve-hour jobs.
+
+## Recommendations and bounded repair
+
+```bash
+metaglens recommend            # suggestions with reasons
+metaglens recommend --apply    # shows a diff and asks before writing
+metaglens run --auto-repair 1  # off by default
+```
+
+`recommend` explains every suggestion and **never rewrites a config silently**.
+Scientific parameters — completeness cut-offs, ANI thresholds, contig-length
+filters — are advisory only: MetaGLens will tell you a value looks unusual and
+point at `metaglens explain`, but will not change it, because that would alter
+your result rather than your run.
+
+`--auto-repair` is off unless you ask for it, and stays inside a hard boundary:
+it may only lower concurrency or threads, raise a memory request, or retry a
+transient failure. It never touches scientific parameters, inputs, databases or
+outputs. It stops after two attempts, stops immediately if the same failure
+recurs, re-runs only the failed stage, and records every attempt (including
+refusals) in `reports/repair_log.jsonl` with a snapshot of the failing script.
 
 ## Outputs
 
