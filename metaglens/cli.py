@@ -496,6 +496,91 @@ def db_get(
         raise typer.Exit(code=2)
 
 
+# ─── plan ────────────────────────────────────────────────────────────────────
+@app.command()
+def plan(
+    config: str = ConfigOpt,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+    plain: bool = typer.Option(False, "--plain",
+                               help="Paste-able plain text (for resource requests)."),
+) -> None:
+    """Show what will run, rough time/RAM/disk, and anything that would block it."""
+    import json as _json
+    from metaglens.decide import plan as plan_mod
+
+    cfg = _load_config(config)
+    data = plan_mod.build_plan(cfg)
+
+    if as_json:
+        console.print_json(_json.dumps(data, ensure_ascii=False))
+        raise typer.Exit(code=0 if data["ok"] else 2)
+
+    if plain:
+        # print() rather than console.print(): keep it copy-paste clean.
+        print(plan_mod.render_plain(data), end="")
+        raise typer.Exit(code=0 if data["ok"] else 2)
+
+    print_banner()
+    par = data["parallel"]
+    _section(
+        f"Plan — {data['project']} · {data['route']} · "
+        f"{data['samples']} sample(s) · {par['jobs']}x{par['threads_per_job']}"
+    )
+
+    table = Table(title="Stages")
+    table.add_column("Stage", style="cyan")
+    table.add_column("Mode")
+    table.add_column("Est. time", justify="right")
+    table.add_column("Peak RAM", justify="right")
+    table.add_column("Disk Δ", justify="right")
+    for stage in data["stages"]:
+        table.add_row(stage["step"], stage["mode"],
+                      plan_mod._hm(stage["minutes"]),
+                      f"{stage['peak_ram_gb']:.0f} GB",
+                      f"{stage['disk_gb']:.0f} GB")
+    totals = data["totals"]
+    table.add_row("[bold]TOTAL[/bold]", "",
+                  f"[bold]{plan_mod._hm(totals['minutes'])}[/bold]",
+                  f"[bold]{totals['peak_ram_gb']:.0f} GB[/bold]",
+                  f"[bold]{totals['disk_gb']:.0f} GB[/bold]")
+    console.print(table)
+
+    band = int(data["estimate"]["band"] * 100)
+    console.print(
+        f"[dim]Estimates are coarse (±{band}%), based on "
+        f"{data['estimate']['reference']}. Real runtime depends heavily on the "
+        f"data.[/dim]"
+    )
+    console.print(f"[dim]Host: {data['hardware']['summary']}[/dim]")
+    console.print(f"[dim]Parallel: {par['reason']}[/dim]")
+
+    if data["databases"]:
+        db_table = Table(title="Required databases")
+        db_table.add_column("Database", style="cyan")
+        db_table.add_column("State")
+        db_table.add_column("Version")
+        db_table.add_column("Path / hint")
+        marks = {"ready": "[green]✓ ready[/green]",
+                 "wrong_path": "[bold red]✗ wrong path[/bold red]",
+                 "missing": "[bold red]✗ missing[/bold red]"}
+        for name, row in data["databases"].items():
+            db_table.add_row(name, marks.get(row["state"], row["state"]),
+                             row["version"] or "—", row["path"] or row["detail"])
+        console.print(db_table)
+
+    for warning in data["db_warnings"] + data["resource_warnings"]:
+        _fail(warning)
+    if data["ok"]:
+        _success("Nothing blocking — ready to run.")
+    else:
+        console.print("\n[dim]Resolve the items above, then re-run "
+                      "[cyan]metaglens plan[/cyan].[/dim]")
+
+    console.print("\n[dim]Need a summary to send to an admin? "
+                  "[cyan]metaglens plan --plain[/cyan][/dim]")
+    raise typer.Exit(code=0 if data["ok"] else 2)
+
+
 # ─── validate ────────────────────────────────────────────────────────────────
 @app.command()
 def validate(config: str = ConfigOpt) -> None:

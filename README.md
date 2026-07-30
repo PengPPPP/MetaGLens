@@ -33,6 +33,9 @@ the environments during setup.
 ```bash
 metaglens init                 # interactive wizard -> writes metaglens.yaml
 metaglens configure            # OR configure in a local web page (loopback + token)
+metaglens doctor               # check tools / databases / hardware for this route
+metaglens db list              # which reference databases this route needs
+metaglens plan                 # stage table: est. time, peak RAM, disk, blockers
 metaglens validate             # check config + dry-render every stage script
 metaglens run --dry-run        # render + bash -n, without executing
 metaglens run                  # materialize and execute the whole route
@@ -50,6 +53,50 @@ metaglens setup-env            # one-shot conda environment creation
 All commands accept `-c/--config PATH` (default `metaglens.yaml`).
 `--only` and `--from` steps are validated against the selected route, so a
 misspelled stage id fails fast instead of silently running nothing.
+
+## Preflight: doctor / db / plan
+
+Three read-only commands answer "will this run actually work?" **before** you
+spend hours of compute. All three accept `--json` and exit non-zero when
+something would block the run, so they also work as CI or script gates.
+
+```bash
+metaglens doctor              # tools, databases, hardware vs. what this route needs
+metaglens doctor --env myenv  # inspect a specific conda environment
+metaglens doctor --fix        # install only the missing required packages
+metaglens db list             # required databases and whether they are ready
+metaglens db where gtdbtk     # full resolution chain, and which level won
+metaglens db verify gtdbtk /path/to/db
+metaglens db get checkm2 /data/db/checkm2
+metaglens plan                # stage table: time / peak RAM / disk, plus blockers
+metaglens plan --plain        # paste-able summary for a resource request
+```
+
+**`doctor`** reports each tool's package version *and* whether the command is
+actually runnable — a package showing up in `conda list` does not mean the
+executable is on your `PATH`. Tools the selected route never invokes are listed
+but marked *not needed*, and can never fail the check; only genuinely required
+tools count. `--fix` installs **only** what is missing and **never upgrades** an
+existing package, after asking for confirmation.
+
+**`db`** keeps database handling honest:
+- `where` prints the whole chain — config path → environment variable →
+  filesystem scan → default location — and marks which level supplied the path.
+- `verify` is strictly read-only; nothing is ever written into a database
+  directory, because a shared install usually is not writable by you.
+- `get` requires an **explicit destination** (no surprise default location),
+  refuses unless free space covers the size plus a 1.2× extraction margin, and
+  downloads only after you confirm. Databases without an official fetch command
+  print the official instructions rather than a guessed URL.
+
+**`plan`** lists every stage with its execution mode, estimated wall time, peak
+memory and disk growth, plus a total. **Estimates are coarse (±50%)** and say so,
+along with the sample size they assume — a labelled order-of-magnitude figure is
+useful, a fake-precise one is not. Missing databases are reported with the exact
+`metaglens db get` command to fix them. `metaglens plan --plain` prints a
+plain-text summary suitable for emailing a supervisor or cluster admin when
+requesting resources; it also records that MetaGLens needs no API key, makes no
+outbound calls during analysis, and incurs no metered charges.
 
 ## Sample discovery
 

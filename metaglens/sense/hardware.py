@@ -66,9 +66,17 @@ def _ram_gb(meminfo_path: str = _MEMINFO) -> float:
 
 
 def _disk_free_gb(path: str) -> float:
-    """Free bytes on the filesystem holding ``path``, in GB (0 on failure)."""
+    """Free space (GB) on the filesystem that will hold ``path``.
+
+    ``path`` may not exist yet (a work_dir about to be created), so walk up to
+    the nearest existing ancestor: returning 0 for a not-yet-created directory
+    would both mislead the reader and silently disable disk preflight checks.
+    """
+    probe = Path(path).expanduser()
     try:
-        return shutil.disk_usage(path).free / _BYTES_PER_GB
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        return shutil.disk_usage(str(probe)).free / _BYTES_PER_GB
     except (OSError, ValueError):
         return 0.0
 

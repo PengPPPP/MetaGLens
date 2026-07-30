@@ -672,6 +672,13 @@ class TestHardwareProbe(unittest.TestCase):
             info = hardware.probe(path=".", meminfo_path=self._meminfo(1024 * 1024))
         self.assertAlmostEqual(info.disk_free_gb, 5.0, places=3)
 
+    def test_disk_free_resolves_nonexistent_path(self):
+        """A work_dir that does not exist yet must not report 0 GB free."""
+        from metaglens.sense import hardware
+        missing = str(Path(tempfile.gettempdir()) / "mg_no_such_dir" / "deeper")
+        info = hardware.probe(path=missing)
+        self.assertGreater(info.disk_free_gb, 0.0)
+
     def test_result_complete_without_psutil(self):
         from metaglens.sense import hardware
         # Force the psutil fallback path to be a no-op and ensure stdlib meminfo
@@ -1403,6 +1410,91 @@ class TestDbWhereAndGet(TempDirCase):
         ok, _detail = db.validate("gtdbtk", str(root))
         self.assertTrue(ok)
         self.assertEqual(sorted(p.name for p in root.rglob("*")), before)
+
+
+class TestExecutionPlan(TempDirCase):
+    """Phase 8.4: plan table, coarse-estimate honesty, DB warnings, plain text."""
+
+    _DB_ENV = ("GTDBTK_DATA_PATH", "CHECKM2DB", "KRAKEN2_DB_PATH", "EGGNOG_DATA_DIR")
+
+    def _clear_env(self):
+        patcher = unittest.mock.patch.dict("os.environ",
+                                           {k: "" for k in self._DB_ENV}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_plan_covers_every_route_step(self):
+        from metaglens.decide import plan as plan_mod
+        cfg = self.make_cfg(route_name="mag_per_sample")
+        data = plan_mod.build_plan(cfg, n_samples=4)
+        self.assertEqual([s["step"] for s in data["stages"]], list(cfg.route.steps))
+        self.assertGreater(data["totals"]["minutes"], 0)
+        self.assertGreater(data["totals"]["disk_gb"], 0)
+
+    def test_estimates_are_labelled_coarse(self):
+        from metaglens.decide import plan as plan_mod
+        cfg = self.make_cfg()
+        data = plan_mod.build_plan(cfg, n_samples=2)
+        self.assertEqual(data["estimate"]["band"], 0.5)
+        self.assertIn("+/-50%", data["estimate"]["note"])
+        text = plan_mod.render_plain(data)
+        self.assertIn("COARSE", text)
+        self.assertIn("+/-50%", text)
+
+    def test_disk_scales_with_sample_count(self):
+        from metaglens.decide import plan as plan_mod
+        cfg = self.make_cfg()
+        small = plan_mod.build_plan(cfg, n_samples=1)["totals"]["disk_gb"]
+        big = plan_mod.build_plan(cfg, n_samples=10)["totals"]["disk_gb"]
+        self.assertGreater(big, small)
+
+    def test_missing_database_produces_warning_with_command(self):
+        from metaglens.decide import plan as plan_mod
+        self._clear_env()
+        cfg = self.make_cfg(route_name="mag_per_sample",
+                            db_dir=str(self.tmp / "nodbs"))
+        data = plan_mod.build_plan(cfg, n_samples=2)
+        self.assertTrue(data["db_warnings"])
+        joined = " ".join(data["db_warnings"])
+        self.assertIn("metaglens db get", joined)
+        self.assertFalse(data["ok"])
+
+    def test_plain_summary_states_no_metered_cost(self):
+        from metaglens.decide import plan as plan_mod
+        cfg = self.make_cfg()
+        text = plan_mod.render_plain(plan_mod.build_plan(cfg, n_samples=3))
+        self.assertIn("no API", text)
+        self.assertIn("metered", text)
+        self.assertIn("TOTAL", text)
+        # Plain text must carry no Rich markup.
+        self.assertNotIn("[/", text)
+        self.assertNotIn("[bold]", text)
+
+    def test_plan_is_json_serialisable(self):
+        from metaglens.decide import plan as plan_mod
+        cfg = self.make_cfg()
+        data = plan_mod.build_plan(cfg, n_samples=2)
+        self.assertEqual(json.loads(json.dumps(data))["route"], cfg.route_name)
+
+    def test_contig_route_plan_omits_mag_stages(self):
+        from metaglens.decide import plan as plan_mod
+        cfg = self.make_cfg(route_name="contig_based", contig_taxonomy="kraken2")
+        steps = [s["step"] for s in plan_mod.build_plan(cfg, n_samples=2)["stages"]]
+        self.assertNotIn("04_binning", steps)
+        self.assertNotIn("05_checkm", steps)
+        self.assertIn("09_contig", steps)
+
+    def test_resource_warning_when_memory_short(self):
+        from metaglens.decide import plan as plan_mod
+        from metaglens.sense import hardware
+        tiny = hardware.HardwareInfo(cores=4, ram_gb=2.0, disk_free_gb=10.0,
+                                     in_container=False)
+        cfg = self.make_cfg()
+        with unittest.mock.patch(
+                "metaglens.decide.plan.hardware_mod.probe", return_value=tiny):
+            data = plan_mod.build_plan(cfg, n_samples=4)
+        self.assertTrue(data["resource_warnings"])
+        self.assertFalse(data["ok"])
 
 
 if __name__ == "__main__":
