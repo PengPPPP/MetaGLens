@@ -254,36 +254,36 @@ POST 回写 `metaglens.yaml`。
 这是设计稿 P1「别让他白跑」的正主,也是新手最高代价失败(缺 DB、内存不够、路径写错)
 的唯一拦截点。增量很小,价值最高。
 
-- [ ] 8.1 **`required_tools(cfg) -> {tool: reason}`(前置底座,先做)**。
+- [x] 8.1 **`required_tools(cfg) -> {tool: reason}`(前置底座,先做)**。
   现有 `PIPELINE_TOOLS` 是扁平 18 项常量,推不出"本次真正要用哪些"。映射:
   route → `routes.STEPS[x].env_group` → `conda_setup.ENV_GROUPS[group]`,再叠加配置开关
   (`assembler` megahit/spades、`align_tool` bowtie2/bwa-mem2、`taxonomy_tool`、
   `contig_taxonomy`、`use_prokka` / `use_eggnog` / `use_bracken` / 四个 binner 开关)。
   与 `required_databases()` 对称。**这是 doctor/plan 共用底座。**
-- [ ] 8.2 **`metaglens doctor [--env NAME] [--fix] [--json]`**(设计稿 §4.1):
+- [x] 8.2 **`metaglens doctor [--env NAME] [--fix] [--json]`**(设计稿 §4.1):
   输出分组表格:工具×版本(按 `--env` 或 config 的环境)、**可执行文件在 PATH 上真的能跑吗**
   (`conda list` 有包 ≠ 命令可用)、数据库就位情况(复用 `sense/database`)、硬件余量
   (复用 `sense/hardware`)。
   **按裁决 D-2**:当前路线用不到的工具**照常展示但标注「当前路线不需要」,不算缺失、不报错**;
   只有 `required_tools` 里的缺失才是问题。`--fix` **只补装缺失,永不升级已有包**
   (沿用 skill "不做 conda update --all" 的约束),且执行前需确认。
-- [ ] 8.3 **`metaglens db list|status|get|verify|where [--json]`**(设计稿 §4.7):
+- [x] 8.3 **`metaglens db list|status|get|verify|where [--json]`**(设计稿 §4.7):
   - `status` / `list`:只显示 `required_databases(cfg)` 推出来的库 + 三态(就位/路径错/未找到);
   - `where <name>`:打印**完整解析链**及命中的是哪一级(显式 → 环境变量 → 文件系统扫描 → 默认);
   - `verify <name>`:只读校验(sentinel + 版本),**不得往 DB 目录写任何临时文件**;
   - `get <name>`:**按裁决 B**——强制显式目标目录(不预设可写默认路径),下载前
     **校验剩余空间 ≥ 体积 × 1.2**,不足则拒绝并提示换盘;**必须显式确认才真下载**
     (200 GB 级操作,默认不动手)。
-- [ ] 8.4 **`metaglens plan [--json]`**(设计稿 §4.3):阶段表(模式/预估时长/峰值内存/
+- [x] 8.4 **`metaglens plan [--json]`**(设计稿 §4.3):阶段表(模式/预估时长/峰值内存/
   磁盘增量),合计行,并对缺失的必需数据库**预警 + 给出 `db get` 命令**。
   时长/内存**必须标注为粗估(±50%)**并说明依据的样本规模——给带误差标注的量级判断,
   但不许假装精确。
   **另含 D-6 附加项 B**:提供一份**可粘贴的纯文本摘要**(`--plain` 或摘要区),供学生向
   导师/管理方申请资源使用,并能同时说明「本流程不产生任何计费」。
-- [ ] 8.5 测试:`required_tools` 随路由/开关变化(contig 路线不应要求 binner/checkm2 等);
+- [x] 8.5 测试:`required_tools` 随路由/开关变化(contig 路线不应要求 binner/checkm2 等);
   doctor 在"环境不存在"与"conda 不可用"下的表现(复用已修的三态);`db where` 解析链
   命中层级正确;`db get` 空间不足时拒绝;`plan` 在缺 DB 时给出预警;`--json` 可被 `json.loads`。
-- [ ] 8.6 `README` 补三个命令用法。commit 分三个:
+- [x] 8.6 `README` 补三个命令用法。commit 分三个:
   `feat(sense): required_tools`、`feat(cli): doctor & db commands`、`feat(cli): plan command`。
 
 **铁律不变**:离线优先、不引重依赖、只读不写别人的 DB 目录、大额下载必须显式确认、
@@ -420,3 +420,59 @@ OK
 **一处需确认的适配（非行为变更）**：7.4 要求 `discover()` 返回值增加两个字段，
 故三处既有测试的 2 元解包改为 `discover(...)[:2]`（`tests/test_metaglens.py:181,188,211`），
 断言值一字未改；`pipeline.resolve_samples` 用 `[0]` 不受影响。
+
+
+### Phase 8 — P1 命令层（commit `8ad153e` + `860c556` + `12b0a5d`）
+
+**8.1 `sense/tools.py::required_tools(cfg)`**（commit `8ad153e`）
+- 19 条 `ToolSpec`（tool/command/group/steps/条件），依据**模板实际调用**而非 `ENV_GROUPS` 粗粒度包列表。
+- 编码了两条 group 推导会漏掉的真实依赖：
+  ① `03_read_mapping.sh` 调 `jgi_summarize_bam_contig_depths`（随 **metabat2** 发布）→ contig 路线
+  开 `calc_depth` 也需要 binning 组工具；② `prodigal` 被 `09_contig` 与「eggNOG 但关掉 Prokka」的
+  `08_annotation` 调用，**却完全不在 `ENV_GROUPS` 里**（见下「遗留」）。
+- 实测：`mag_per_sample` 需 14/19；`contig_based+kraken2` 需 9/19。
+
+**8.2 `doctor`**（commit `860c556`）
+- `sense/doctor.py::build_report()` 纯函数产出 dict，表格与 `--json` 同源。
+- **裁决 D-2**：不需要的工具照常列出、标 `not_needed`，**永不进 problems**；只有 `required_tools`
+  里的缺失才算问题。
+- 区分「包在 / 命令能跑」两个信号，新增 `package_only` 状态（`conda list` 有包但不在当前 PATH）。
+- `--fix` 只装缺失、**不升级任何已有包**，且执行前 `typer.confirm`。
+- `conda_env` 新增 `env_prefixes()` 以检查 `<prefix>/bin/<cmd>` 是否真存在。
+
+**8.3 `db list/status/where/verify/get`**（commit `860c556`）
+- `resolution_chain()`：四级链（config→env→scan→default）逐级给出候选与结论，**标出命中哪一级**。
+- `verify` 只读；`plan_get()` **不下载不写盘**。
+- `get` 按**裁决 B**：强制显式目标目录、空间需 ≥ 体积×1.2（解压峰值）、不足即拒绝、
+  必须显式确认才执行；**无官方下载命令的库只打印官方指引，绝不编造 URL**。
+
+**8.4 `plan`**（commit `12b0a5d`）
+- `decide/plan.py`：阶段表（模式/时长/峰值内存/磁盘）+ 合计 + 缺库预警（附 `db get` 命令）
+  + 资源预警（峰值内存/磁盘超限）；`ok=False` 时 CLI 退出码 2，可作 gate。
+- 时长/内存**显式标注 ±50%** 并写明依据样本规模（`~40M read pairs (2x150bp) @ 8 threads/job`）。
+- **D-6 附加项 B**：`--plain` 输出可粘贴纯文本摘要（无任何 Rich 标记，有测试断言），
+  含「无 API key / 分析期间无外呼 / 无按次计费」声明。
+
+**顺带修掉一个真实缺陷**：`hardware._disk_free_gb` 对尚不存在的 `work_dir` 返回 0 GB，
+既显示误导又让磁盘预警短路失效；改为回溯到最近存在的父目录（`/tmp/mg_nope/deep` → 772 GB）。
+
+**门禁**：`unittest` 113→**135** 全绿（8.1 +9、8.2/8.3 +13、8.4 +8、磁盘修复 +1）；
+`bash -n` 全 14 模板 OK；`py_compile` 全模块 OK。
+
+**实测输出**：
+```
+$ required_tools  mag_per_sample → 14/19 ; contig_based+kraken2 → 9/19
+$ doctor (env=checkm2_env)  required=14 not_needed=5 ok=False  problems=15
+$ db where gtdbtk
+  1. config            (not set)
+  2. env               $GTDBTK_DATA_PATH (unset)
+  3. scan     <== USED /home/h1020/gtdbtk_data/release232
+  4. default           /tmp/w/databases/gtdbtk
+$ plan --plain (7 samples/32 threads) → TOTAL 10h02m / 168 GB peak / 158 GB disk
+  + 标注 COARSE ±50%，checkm2 与 eggnog 缺失并给出 db get 命令
+```
+
+**遗留（需你裁决，我未擅自改）**：`prodigal` 是 `09_contig` 的必需工具，但不在
+`conda_setup.ENV_GROUPS` 任何一组里 → `metaglens setup-env` 不会安装它，contig 路线
+建完环境仍会缺工具。`doctor` 现在能正确报出来。是否把 `prodigal` 加进 `ENV_GROUPS["mag"]`？
+这会改变 `setup-env` 的建环境行为，故未动。
