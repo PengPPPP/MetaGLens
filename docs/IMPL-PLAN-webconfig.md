@@ -299,12 +299,12 @@ POST 回写 `metaglens.yaml`。
 `conda_env.PIPELINE_TOOLS` **都没有它**;而 skill 版 SKILL.md 明确把 Prodigal 列入
 待检查工具。故这是软件版的遗漏,非有意取舍。
 
-- [ ] 9.A1 `ENV_GROUPS["mag"]` 加 `prodigal`(`09_contig`/`08_annotation` 的 env_group 均为 mag)。
-- [ ] 9.A2 `conda_env.PIPELINE_TOOLS` 加 `prodigal`(否则向导缺失检查同样漏报)。
-- [ ] 9.A3 测试:`setup-env` 的 mag 组命令含 prodigal;contig 路线 `required_tools` 与
+- [x] 9.A1 `ENV_GROUPS["mag"]` 加 `prodigal`(`09_contig`/`08_annotation` 的 env_group 均为 mag)。
+- [x] 9.A2 `conda_env.PIPELINE_TOOLS` 加 `prodigal`(否则向导缺失检查同样漏报)。
+- [x] 9.A3 测试:`setup-env` 的 mag 组命令含 prodigal;contig 路线 `required_tools` 与
   `ENV_GROUPS` 不再出现"要求但装不上"的差集。**建议加一条通用断言:
   `required_tools` 覆盖的每个工具都能被某个 ENV_GROUP 提供**——防止再漏第二个。
-- [ ] 9.A4 commit `fix(conda): ship prodigal — required by contig route but absent from env groups`。
+- [x] 9.A4 commit `fix(conda): ship prodigal — required by contig route but absent from env groups`。
 
 ### 9.B `metaglens demo` — 桩工具端到端(方案已定)
 
@@ -316,25 +316,25 @@ POST 回写 `metaglens.yaml`。
 **真实控制流 + 状态机 + 产物验证 + 报告/监控生成**,而非仅 `bash -n`。
 (这类测试本可抓到 §7-8 的 nullglob bug——桩工具不产 gtdbtk 输出时,来源选择会被真正走一遍。)
 
-- [ ] 9.B1 `metaglens/demo/` :合成极小 FASTQ(每样本几千条,内置或即时生成)+ 桩工具集。
+- [x] 9.B1 `metaglens/demo/` :合成极小 FASTQ(每样本几千条,内置或即时生成)+ 桩工具集。
   桩必须产出**下游真正会读的最小合法产物**(如 fastp 的 `_fastp.json` 含 summary 字段、
   contigs FASTA、BAM 可被后续步骤识别的替代物等);桩要**打印自己被调用**便于诊断。
-- [ ] 9.B2 `metaglens demo [--route NAME] [--keep] [--json]`:建临时项目 → 渲染 → 用桩 PATH
+- [x] 9.B2 `metaglens demo [--route NAME] [--keep] [--json]`:建临时项目 → 渲染 → 用桩 PATH
   跑完选定路由 → 断言各阶段 `completed`、关键产物存在、`report.html` 与 `monitor.html` 生成
   → 打印结论并清理(`--keep` 保留供排查)。**默认不碰用户已有项目、不写 `~`**。
-- [ ] 9.B3 至少覆盖 `mag_per_sample` 与 `contig_based` 两条路由(后者正是 §7-8 出问题的那条)。
-- [ ] 9.B4 测试 + `README` 说明 `demo` 是"装完自检 + 回归网",并注明它用桩工具、
+- [x] 9.B3 至少覆盖 `mag_per_sample` 与 `contig_based` 两条路由(后者正是 §7-8 出问题的那条)。
+- [x] 9.B4 测试 + `README` 说明 `demo` 是"装完自检 + 回归网",并注明它用桩工具、
   **不产生科学结果**(避免误解为真实分析)。
-- [ ] 9.B5 commit `feat(demo): offline end-to-end self-check with a stub toolchain`。
+- [x] 9.B5 commit `feat(demo): offline end-to-end self-check with a stub toolchain`。
 
 **后续可选(本阶段不做)**:`demo --full` 用真实工具跑最短路由,受工具可用性限制。
 
 ### 9.C CI
 
-- [ ] 9.C1 `.github/workflows/ci.yml`:矩阵 Python 3.8/3.10+;跑
+- [x] 9.C1 `.github/workflows/ci.yml`:矩阵 Python 3.8/3.10+;跑
   `python3 -m unittest discover -s tests -t .`、`bash -n` 全模板、`metaglens demo`(桩)。
   不依赖网络与 conda。
-- [ ] 9.C2 commit `ci: run tests, bash -n and the stub demo`。
+- [x] 9.C2 commit `ci: run tests, bash -n and the stub demo`。
 
 ---
 
@@ -523,3 +523,51 @@ $ plan --plain (7 samples/32 threads) → TOTAL 10h02m / 168 GB peak / 158 GB di
 `conda_setup.ENV_GROUPS` 任何一组里 → `metaglens setup-env` 不会安装它，contig 路线
 建完环境仍会缺工具。`doctor` 现在能正确报出来。是否把 `prodigal` 加进 `ENV_GROUPS["mag"]`？
 这会改变 `setup-env` 的建环境行为，故未动。
+
+
+### Phase 9 — prodigal 修复 + demo(桩) + CI（commit `4800f03` + `2e798c2` + `2924313`）
+
+**9.A prodigal**（commit `4800f03`）
+- `ENV_GROUPS["mag"]` 与 `PIPELINE_TOOLS` 均补 `prodigal`。
+- **通用断言（比单修 prodigal 更值钱）**：`required_tools(cfg) ⊆ ∪ENV_GROUPS`，
+  覆盖全部 4 条 route × 6 组开关组合；另加 `all_known_tools() ⊆ ∪ENV_GROUPS`。
+- **验证这条断言真有牙齿**：临时撤掉 prodigal 后它按预期失败，报
+  `mag_per_sample {'use_prokka': False}: required but no ENV_GROUP provides {'prodigal'}`。
+
+**9.B `metaglens demo`**（commit `2e798c2`）
+- `metaglens/demo/`：`stubs.py`（22 个桩，各吐下游真正会读的最小合法产物）+
+  `runner.py`（建临时项目 → 渲染 → 桩 PATH 跑完 → 断言阶段/产物/report/monitor）+
+  `__main__.py`（`python3 -m metaglens.demo`，**不依赖 typer/rich**，供 CI）。
+- 桩链让**真实 contig 名贯通**：`bowtie2-build` 记 `.stubrefs` → 比对器回放为 `@SQ`
+  → `samtools coverage` 据此汇总，`mag_abundance` 才能按 `<mag>|<contig>` 聚合。
+- 覆盖 `mag_per_sample`（12 阶段）与 `contig_based`（7 阶段）。
+- **建 demo 过程中它自己抓出两个真实缺口**：DAS Tool 的 `Fasta_to_Contigs2Bin.sh`
+  辅助脚本、`samtools coverage` —— 真实脚本走到那里就停，`bash -n` 永远发现不了。
+- 另外 Phase 0 的空表守卫在开发中真的触发过一次（MAG 名未贯通导致 0 taxa），说明守卫有效。
+- 默认只写自己的临时目录（有测试断言 `$HOME` 内容前后不变）；失败时保留现场。
+- README 显著标注 **不产生科学结果**。
+
+**9.C CI**（commit `2924313`）
+- `test` 任务：Python **3.8/3.10/3.12** × (compileall + unittest + `bash -n` 全模板 + 桩 demo)，
+  只装 PyYAML，无网络无 conda。
+- `package` 任务：构建 wheel 并断言各子包与模板确实在包内（针对"子包曾被 wheel 丢弃"的回归守卫）。
+- 本地已等价验证：`compileall` OK、`bash -n` OK、`python -m metaglens.demo` 两路由 PASS、
+  `python -m build --wheel` 成功且 8 个必需路径全部在包内（50 文件）。
+
+**门禁**：`unittest` 135→**147** 全绿（9.A +5、9.B +7、磁盘/其它 +0；含 demo 端到端 2 条路由）；
+`bash -n` 全 14 模板 OK；`py_compile`/`compileall` 全模块 OK。
+
+**实测输出**：
+```
+$ python3 -m metaglens.demo
+==> mag_per_sample   12 阶段全 completed → PASS
+==> contig_based      7 阶段全 completed → PASS
+PASS — 2 route(s); stub tools, no scientific output.
+
+contig_based 的 10_community/SOURCE.txt:
+  "Kraken2 contig-based composition ..."   ← 正是 §7-8 修复前不可达的死代码分支
+mag_per_sample 的 report.html payload: qc=2 行 / mags=4 / taxa=1 / timeline=12
+  （qc 有数据即 §7-1 fastp glob 修复仍生效）
+```
+
+**打包**：`pyproject` 补 `metaglens.demo` 子包（否则 wheel 装不到 demo）。
