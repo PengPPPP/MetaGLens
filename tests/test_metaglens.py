@@ -945,6 +945,24 @@ class TestWebConfig(TempDirCase):
         self.assertIn("zh:", page)                       # bilingual dicts
         self.assertIn("en:", page)
 
+    def test_plan_uses_real_sample_count_not_hardcoded(self):
+        """Regression: the plan request must not hardcode n=1.
+
+        A previous version fetched the samples box but never used it, so the
+        parallel recommendation was always computed for a single sample. The URL
+        concatenation ("&n="+n) is identical in both versions — only the value
+        bound to n differs — so assert on the binding, not the URL.
+        """
+        from metaglens.express import webconfig
+        page = webconfig.build_page("TOK", lang="en")
+        # n must be derived from the discovered sample count ...
+        self.assertIn("var n=SAMPLES.length||1", page)
+        # ... and still concatenated into the plan URL as a variable.
+        self.assertIn('"&n="+n', page)
+        # The stale hardcoded binding and its dead fetch must be gone.
+        self.assertNotIn("var n=1;", page)
+        self.assertNotIn('var sb=document.getElementById("samples-box")', page)
+
     def test_live_server_token_and_save(self):
         import urllib.request
         import urllib.error

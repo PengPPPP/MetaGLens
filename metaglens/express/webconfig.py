@@ -457,7 +457,7 @@ function refreshSamples(){var d=val("raw_data_dir");if(!d)return;fetch(api("/api
   h+='</tbody></table></div><div class="hint">'+t("edithint")+'</div>';
   box.innerHTML=h;document.getElementById("form").appendChild(box);});}
 function refreshPlan(){fetch(api("/api/hardware")).then(function(r){return r.json();}).then(function(hw){
-  var n=1;var sb=document.getElementById("samples-box");
+  var n=SAMPLES.length||1;
   fetch(api("/api/plan?cores="+hw.cores+"&ram="+hw.ram_gb+"&n="+n)).then(function(r){return r.json();}).then(function(p){
     var box=document.getElementById("plan-box")||el("div",{id:"plan-box","class":"reason"});box.id="plan-box";
     box.textContent=t("plan")+": "+p.parallel_jobs+" x "+p.threads_per_job+" — "+p.reason;
