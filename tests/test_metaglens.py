@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -2212,6 +2213,201 @@ class TestExplainKnowledge(unittest.TestCase):
     def test_lookup_is_case_insensitive(self):
         from metaglens.express import explain
         self.assertIsNotNone(explain.lookup("MIMAG"))
+
+
+class TestProgressParsers(unittest.TestCase):
+    """Phase 13.2: progress from logs, degrading rather than guessing wrong."""
+
+    def _log(self, stage: str, text: str) -> Path:
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        (d / "reports" / "logs").mkdir(parents=True)
+        (d / "reports" / "logs" / f"{stage}.log").write_text(text, encoding="utf-8")
+        return d
+
+    def test_qc_counts_samples(self):
+        from metaglens.observe import progress
+        log = ("Processing sample: A\n  [A] QC completed.\n"
+               "Processing sample: B\n  [B] QC completed.\n"
+               "Processing sample: C\n")
+        prog = progress.parse_log("01_qc", log.splitlines())
+        self.assertTrue(prog.determinate)
+        self.assertEqual((prog.done, prog.total), (2, 3))
+        self.assertEqual(prog.active, ["C"])
+
+    def test_mapping_and_assembly_counts(self):
+        from metaglens.observe import progress
+        prog = progress.parse_log("03_mapping", [
+            "Mapping sample: A", "  [A] mapping completed.",
+            "Mapping sample: B", "  [B] mapping completed."])
+        self.assertEqual((prog.done, prog.total), (2, 2))
+        prog2 = progress.parse_log("02_assembly", [
+            "Assembling sample: A", "  [A] Contig stats:",
+            "Assembling sample: B"])
+        self.assertEqual(prog2.done, 1)
+
+    def test_declared_total_is_used(self):
+        from metaglens.observe import progress
+        prog = progress.parse_log("08_annotation", [
+            "MAGs to annotate: 4",
+            "  Annotating: m1", "  Annotating: m2", "  Annotating: m3"])
+        self.assertTrue(prog.determinate)
+        self.assertEqual(prog.total, 4)
+        self.assertEqual(prog.done, 2)          # two finished, one in flight
+        self.assertEqual(prog.active, ["m3"])
+        # Never invents unit names from stray text.
+        for unit in prog.units:
+            self.assertTrue(unit.startswith("m"), unit)
+
+    def test_unparseable_log_degrades_to_indeterminate(self):
+        from metaglens.observe import progress
+        prog = progress.parse_log("05_checkm", ["something entirely unexpected",
+                                                "and more of it"])
+        self.assertFalse(prog.determinate)
+        self.assertIsNone(prog.fraction)
+        self.assertTrue(prog.detail)            # still says something useful
+
+    def test_tool_hints_when_units_unknown(self):
+        from metaglens.observe import progress
+        prog = progress.parse_log("02_assembly",
+                                  ["--- [k = 99 ] assembling contigs"])
+        self.assertFalse(prog.determinate)
+        self.assertIn("k=99", prog.detail)
+        prog2 = progress.parse_log("03_mapping",
+                                   ["95.20% overall alignment rate"])
+        self.assertIn("95.20", prog2.detail)
+
+    def test_quiet_log_is_reported_as_normal_not_stalled(self):
+        """A silent assembler must never be presented as a hung job."""
+        from metaglens.observe import progress
+        d = self._log("02_assembly", "Assembling sample: A\n")
+        prog = progress.parse_stage(d, "02_assembly", now=time.time() + 3600)
+        self.assertGreater(prog.seconds_since_output, 3000)
+        self.assertIn("normal", prog.heartbeat.lower())
+        for word in ("stall", "hung", "stuck", "dead", "fail"):
+            self.assertNotIn(word, prog.heartbeat.lower())
+
+    def test_missing_log_does_not_raise(self):
+        from metaglens.observe import progress
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        prog = progress.parse_stage(d, "01_qc")
+        self.assertFalse(prog.determinate)
+        self.assertTrue(prog.detail)
+
+    def test_progress_is_json_serialisable(self):
+        from metaglens.observe import progress
+        prog = progress.parse_log("01_qc", ["Processing sample: A"])
+        self.assertIn("determinate", json.loads(json.dumps(prog.as_dict())))
+
+
+class TestResourceSampling(unittest.TestCase):
+    """Phase 13.1: stdlib sampling, psutil optional."""
+
+    def test_sample_populates_core_fields(self):
+        from metaglens.observe import resources
+        s = resources.sample()
+        self.assertGreaterEqual(s.cores, 1)
+        self.assertIsNotNone(s.ram_total_gb)
+        self.assertTrue(s.summary())
+
+    def test_sample_without_psutil(self):
+        from metaglens.observe import resources
+        real_import = __import__
+
+        def no_psutil(name, *args, **kwargs):
+            if name == "psutil":
+                raise ImportError("psutil not available")
+            return real_import(name, *args, **kwargs)
+
+        with unittest.mock.patch("builtins.__import__", side_effect=no_psutil):
+            s = resources.sample()
+        self.assertGreaterEqual(s.cores, 1)
+        self.assertTrue(s.summary())
+
+    def test_disk_measurement_for_directory(self):
+        from metaglens.observe import resources
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        (d / "f.bin").write_bytes(b"x" * 4096)
+        s = resources.sample(d, measure_disk=True)
+        self.assertIsNotNone(s.disk_used_gb)
+        self.assertIsNotNone(s.disk_free_gb)
+
+    def test_sample_is_json_serialisable(self):
+        from metaglens.observe import resources
+        self.assertIn("cores", json.loads(json.dumps(resources.sample().as_dict())))
+
+
+class TestSharedCollectionLayer(unittest.TestCase):
+    """Phase 13.5: HTML page and terminal view read one collector."""
+
+    def _results(self) -> Path:
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        (d / "reports" / "logs").mkdir(parents=True)
+        (d / "pipeline_status.json").write_text(json.dumps({
+            "project_name": "demo", "route_name": "mag_per_sample",
+            "selected_steps": ["01_qc", "02_assembly", "03_mapping"],
+            "steps": {"01_qc": {"status": "completed", "attempts": 1},
+                      "02_assembly": {"status": "running", "attempts": 1},
+                      "03_mapping": {"status": "pending", "attempts": 0}}}),
+            encoding="utf-8")
+        (d / "reports" / "logs" / "02_assembly.log").write_text(
+            "Assembling sample: A\n  [A] Contig stats:\nAssembling sample: B\n",
+            encoding="utf-8")
+        return d
+
+    def test_collect_includes_progress_and_resources(self):
+        from metaglens.observe import monitor
+        data = monitor.collect(self._results())
+        self.assertEqual(data["current"], "02_assembly")
+        self.assertEqual(data["completed"], 1)
+        self.assertEqual(data["total_steps"], 3)
+        self.assertTrue(data["progress"])
+        self.assertTrue(data["resources"])
+
+    def test_html_page_shows_progress_and_heartbeat(self):
+        from metaglens.observe import monitor
+        results = self._results()
+        html = monitor.write_monitor(results).read_text(encoding="utf-8")
+        self.assertIn("Stages:", html)
+        self.assertIn("unit(s)", html)
+
+    def test_dashboard_renders_from_same_snapshot(self):
+        from metaglens.observe import monitor
+        from metaglens.express import dashboard
+        from rich.console import Console
+        data = monitor.collect(self._results())
+        console = Console(file=__import__("io").StringIO(), width=100,
+                         force_terminal=False)
+        console.print(dashboard.render(data))
+        out = console.file.getvalue()
+        for step in ("01_qc", "02_assembly", "03_mapping"):
+            self.assertIn(step, out)
+
+    def test_dashboard_states_that_leaving_is_safe(self):
+        """The q/Ctrl-C semantics must be visible, never ambiguous."""
+        from metaglens.observe import monitor
+        from metaglens.express import dashboard
+        from rich.console import Console
+        data = monitor.collect(self._results())
+        console = Console(file=__import__("io").StringIO(), width=100,
+                         force_terminal=False)
+        console.print(dashboard.render(data, quit_hint=True))
+        out = console.file.getvalue().replace("\n", " ")
+        self.assertIn("keeps running", out)
+
+    def test_watch_once_does_not_touch_the_run(self):
+        from metaglens.express import dashboard
+        from rich.console import Console
+        results = self._results()
+        before = json.loads((results / "pipeline_status.json").read_text())
+        console = Console(file=__import__("io").StringIO(), width=100,
+                         force_terminal=False)
+        dashboard.watch(results, console=console, once=True)
+        after = json.loads((results / "pipeline_status.json").read_text())
+        self.assertEqual(before, after, "watching must never modify run state")
 
 
 if __name__ == "__main__":

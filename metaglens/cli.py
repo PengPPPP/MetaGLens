@@ -942,6 +942,8 @@ def run(
                                              help="Resume from this step."),
     strict_gates: bool = typer.Option(False, "--strict-gates",
                                        help="Stop on quality-gate warnings too."),
+    monitor_page: bool = typer.Option(False, "--monitor",
+                                       help="Keep monitor.html updated during the run."),
 ) -> None:
     """Materialize scripts and execute the pipeline."""
     print_banner()
@@ -967,6 +969,12 @@ def run(
         raise typer.Exit(code=2)
 
     from metaglens.decide import gates as gates_mod
+    from metaglens.observe import monitor as monitor_mod
+
+    if monitor_page:
+        page = monitor_mod.write_monitor(cfg.results_dir)
+        console.print(f"  [dim]Live page: file://{page} "
+                      f"(self-refreshing; also: metaglens watch)[/dim]")
 
     for step_id in step_list:
         if pipeline.step_status(cfg, step_id) == "completed":
@@ -978,6 +986,9 @@ def run(
             task = progress.add_task(f"Running {step_id}...", total=None)
             rc = pipeline.run_step(cfg, step_id)
             progress.update(task, completed=1, total=1)
+        if monitor_page:
+            monitor_mod.write_monitor(cfg.results_dir)
+
         if rc != 0:
             from metaglens.decide import diagnose as diag_mod
             diag = diag_mod.diagnose(cfg.results_dir, step_id, exit_code=rc)
@@ -1084,6 +1095,53 @@ def status(
                 f"\n[bold red]Last failure:[/bold red] {lf.get('stage')} — "
                 f"{lf.get('command')} (exit {lf.get('exit_code')}, line {lf.get('line')})"
             )
+
+
+# ─── watch ───────────────────────────────────────────────────────────────────
+@app.command()
+def watch(
+    config: str = ConfigOpt,
+    interval: float = typer.Option(2.0, "--interval", help="Refresh seconds."),
+    once: bool = typer.Option(False, "--once", help="Print one snapshot and exit."),
+    as_json: bool = typer.Option(False, "--json",
+                                 help="One machine-readable snapshot."),
+) -> None:
+    """Watch a running pipeline (read-only; leaving never stops the run)."""
+    import json as _json
+    from metaglens.express import dashboard
+    from metaglens.observe import monitor as monitor_mod
+
+    cfg = _load_config(config)
+    results = cfg.results_dir
+    if not results.is_dir():
+        _fail3("Nothing to watch yet.",
+               "No results directory, so no run has started.",
+               ["metaglens run"])
+        raise typer.Exit(code=2)
+
+    if as_json:
+        console.print_json(_json.dumps(monitor_mod.collect(results),
+                                       ensure_ascii=False))
+        return
+
+    snapshot = monitor_mod.collect(results)
+    if snapshot.get("current") is None:
+        done = snapshot.get("completed", 0)
+        total = snapshot.get("total_steps", 0)
+        if total and done == total:
+            _success(f"All {total} stage(s) completed — nothing is running.")
+        else:
+            console.print("[yellow]No stage is currently running.[/yellow] "
+                          f"[dim]{done}/{total} completed.[/dim]")
+        console.print("[dim]Showing the last recorded state.[/dim]\n")
+        console.print(dashboard.render(snapshot, quit_hint=False))
+        console.print("\n[dim]Start a run in another window (or inside tmux), "
+                      "then re-run [cyan]metaglens watch[/cyan].[/dim]")
+        return
+
+    console.print("[dim]Read-only view. Ctrl-C leaves it; the pipeline keeps "
+                  "running.[/dim]")
+    dashboard.watch(results, interval=interval, console=console, once=once)
 
 
 # ─── monitor ─────────────────────────────────────────────────────────────────
