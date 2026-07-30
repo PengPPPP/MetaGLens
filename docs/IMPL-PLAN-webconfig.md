@@ -494,23 +494,23 @@ diagnose 归因准确率验证过再上,否则会自动地做错事」。
 
 ### 16.A 环境勘查(先摸清能跑到哪一步)
 
-- [ ] 16.A1 用 `metaglens doctor --env <name>` 逐个探查候选环境
+- [x] 16.A1 用 `metaglens doctor --env <name>` 逐个探查候选环境
   (`fastq_megahit` / `metawrap_env` / `checkm2_env` / `drep_env` / `gtdbtk`),
   记录每个环境**实际可运行**的工具与版本(注意 `doctor` 的 `package_only` 与可执行两种信号)。
-- [ ] 16.A2 产出一张「工具 → 所在环境 → 版本」实测表写进完成备注。
+- [x] 16.A2 产出一张「工具 → 所在环境 → 版本」实测表写进完成备注。
   **这张表决定后续能真跑哪几个阶段。**
-- [ ] 16.A3 顺带验证 `doctor` 在真实环境上的报告是否准确(有无误报/漏报)。
+- [x] 16.A3 顺带验证 `doctor` 在真实环境上的报告是否准确(有无误报/漏报)。
 
 ### 16.B 真数据准备(小规模)
 
-- [ ] 16.B1 找一份可用的真实 FASTQ:优先复用机器上已有的公共数据;若无,
+- [x] 16.B1 找一份可用的真实 FASTQ:优先复用机器上已有的公共数据;若无,
   用 `seqkit`/`head` 从任意现存 fastq.gz **抽取少量 reads**(如每样本 2–5 万条)构造 2 个样本。
   **不联网下载**。若确实找不到任何真实 fastq,如实记录并跳到 16.D。
-- [ ] 16.B2 数据放临时目录;记录来源与规模。
+- [x] 16.B2 数据放临时目录;记录来源与规模。
 
 ### 16.C 真跑(能跑多远跑多远)
 
-- [ ] 16.C1 用 `metaglens init`(或直接写 yaml)+ `plan` + `doctor` + `db status` 走一遍**跑前检查**,
+- [x] 16.C1 用 `metaglens init`(或直接写 yaml)+ `plan` + `doctor` + `db status` 走一遍**跑前检查**,
   确认这些命令在真实环境下给出的信息**准确**(这本身就是 P1 的核心价值验证)。
 - [ ] 16.C2 真跑 `01_qc` → `02_assembly` → `03_mapping`(最可能具备工具的三段)。
   `conda_mode=reuse` 指向实测可用的环境;若工具分散在多个环境导致单一 `conda_env`
@@ -525,12 +525,12 @@ diagnose 归因准确率验证过再上,否则会自动地做错事」。
 
 ### 16.D 结果与修复
 
-- [ ] 16.D1 把全部发现整理成清单:分「真实缺陷」/「设计假设不成立」/「文档需澄清」三类。
-- [ ] 16.D2 **真实缺陷**逐个修 + 补回归测试(优先修会导致错误科学结果或误判的)。
-- [ ] 16.D3 **设计假设不成立**的(如多环境工具分散)只记录 + 提出方案,**不擅自改设计**,
+- [x] 16.D1 把全部发现整理成清单:分「真实缺陷」/「设计假设不成立」/「文档需澄清」三类。
+- [x] 16.D2 **真实缺陷**逐个修 + 补回归测试(优先修会导致错误科学结果或误判的)。
+- [x] 16.D3 **设计假设不成立**的(如多环境工具分散)只记录 + 提出方案,**不擅自改设计**,
   等用户裁决。
-- [ ] 16.D4 清理:删除临时工作目录;确认既有 conda 环境与 `~/gtdbtk_data` **未被改动**。
-- [ ] 16.D5 commit:`test: real-environment validation findings`(+ 各修复独立 commit)。
+- [x] 16.D4 清理:删除临时工作目录;确认既有 conda 环境与 `~/gtdbtk_data` **未被改动**。
+- [x] 16.D5 commit:`test: real-environment validation findings`(+ 各修复独立 commit)。
 
 **验收**:完成备注里有 ① 工具实测表 ② 真跑到哪一阶段及每阶段结论
 ③ 发现清单(三类)④ 已修项与其回归测试 ⑤ 未污染环境的确认。
@@ -541,10 +541,10 @@ diagnose 归因准确率验证过再上,否则会自动地做错事」。
 
 ### 17.A logo 放大(用户明确要求)
 
-- [ ] 17.A1 `_theme.py` 的 `.logo{height:88px}` 改为 **`height:132px`**(约 1.5 倍)。
+- [x] 17.A1 `_theme.py` 的 `.logo{height:88px}` 改为 **`height:132px`**(约 1.5 倍)。
   这是共享主题,报告/配置/监控三页会一起变大——**这是期望的**(视觉统一)。
   确认 header 的 `align-items:center` 与 `flex-wrap` 在放大后仍正常、不挤压标题。
-- [ ] 17.A2 若移动端 `@media(max-width:700px)` 下 132px 过大,可加一条
+- [x] 17.A2 若移动端 `@media(max-width:700px)` 下 132px 过大,可加一条
   `.logo{height:96px}` 的媒体查询;否则保持。
 
 ### 17.B 并行建议硬编码 n=1(IDE 会话发现的前端缺陷)
@@ -556,25 +556,25 @@ fetch(api("/api/plan?cores="+hw.cores+"&ram="+hw.ram_gb+"&n="+n))
 ```
 后果:网页并行建议**永远按 1 个样本算**(3 样本 → 1×112,应为 3×37)。
 
-- [ ] 17.B1 让 `refreshSamples()` 把发现的样本数存到一个模块级变量(如 `window.__nSamples`
+- [x] 17.B1 让 `refreshSamples()` 把发现的样本数存到一个模块级变量(如 `window.__nSamples`
   或闭包变量),`refreshPlan()` 用它代替 `n=1`;无样本时回退 1。
-- [ ] 17.B2 **补一条能抓住这类前端缺陷的测试**:对 `build_page()` 产出的 JS 做静态断言——
+- [x] 17.B2 **补一条能抓住这类前端缺陷的测试**:对 `build_page()` 产出的 JS 做静态断言——
   至少断言 `/api/plan` 的 URL 里 `n=` 参数**不是硬编码的 `n=1`**,而是引用样本数变量。
   (这类前端逻辑单测难覆盖,用"生成的 JS 不含某坏模式"的断言兜底。)
-- [ ] 17.B3 顺带自查 webconfig.py 里**还有没有其它"取了变量却没用"或硬编码**的地方。
+- [x] 17.B3 顺带自查 webconfig.py 里**还有没有其它"取了变量却没用"或硬编码**的地方。
 
 ### 17.C Phase 16 发现文档化
 
-- [ ] 17.C1 把 Phase 16 的工具实测表(工具→环境→版本)、跑前检查结论、
+- [x] 17.C1 把 Phase 16 的工具实测表(工具→环境→版本)、跑前检查结论、
   以及**多环境分散问题**(fastp/seqkit/megahit 分属三个环境,无单一环境能跑完一组)
   整理进完成备注。**这是"设计假设不成立"级,只记录 + 给候选方案,不改设计、不改代码。**
-- [ ] 17.C2 候选方向写入备注供用户裁决:① 每工具/每阶段指定环境的细粒度模型;
+- [x] 17.C2 候选方向写入备注供用户裁决:① 每工具/每阶段指定环境的细粒度模型;
   ② `doctor` 增加"跨环境拼 PATH"建议;③ 文档说明 reuse 单环境模式的适用前提。
 
 ### 17.D 门禁与提交
 
-- [ ] 17.D1 全绿:`unittest`(裸解释器)+ `bash -n` + `demo` 两路由;`compileall` 干净。
-- [ ] 17.D2 commits 分开:`style(theme): enlarge logo`、`fix(webconfig): plan uses real sample count`、
+- [x] 17.D1 全绿:`unittest`(裸解释器)+ `bash -n` + `demo` 两路由;`compileall` 干净。
+- [x] 17.D2 commits 分开:`style(theme): enlarge logo`、`fix(webconfig): plan uses real sample count`、
   `docs: phase 16 real-env findings`。
 
 ---
@@ -893,3 +893,63 @@ mag_per_sample 的 report.html payload: qc=2 行 / mags=4 / taxa=1 / timeline=12
   而不是静默停用某个功能。
 - **全量门禁**：`unittest` **248** 全绿（177→248，+71）；`bash -n` 全 14 模板 OK；
   `compileall` 干净；`python3 -m metaglens.demo` 两路由 PASS；wheel 67 文件、18 个必需路径齐全。
+
+
+### Phase 16 — 真实环境验证发现（仅记录，未改设计/代码，待用户裁决）
+
+**前提**：conda 在 `/home/h1020/miniconda3/bin/conda`，50 个环境；PATH 上无任何生信工具，
+全部在各 conda 环境内。真实数据用 `~/FD/data/clean_reads/` 的 FWJ101/FWJ102
+（Illumina 2×150），每样本抽样 30k 条至临时目录（**已删除**）。全程只读，未改动任何
+conda 环境，未写 `~/gtdbtk_data`，未下载数据库。
+
+**① 工具实测表（工具 → 环境 → 版本，均以"命令可执行"为准）**
+
+| 工具 | 环境 | 版本 | 所属阶段组 |
+|---|---|---|---|
+| fastp | fastq_megahit | 1.1.0 | qc (01) |
+| megahit | fastq_megahit / metawrap_env | 1.2.9 / 1.1.3 | qc (02) |
+| seqkit | step_10_env（及多个 step_*_env） | — | qc (02) |
+| bowtie2 | metawrap_env / metabolic_env | 2.3.5.1 / 2.5.4 | qc (03) |
+| samtools | metawrap_env / metabolic_env | 1.9 / 1.12 | qc (03) |
+| metabat2 | metawrap_env | 2.12.1 | binning (04) |
+| maxbin2 / concoct / prokka / kraken2 / prodigal | metawrap_env | 各版本 | binning/mag |
+| checkm2 | checkm2_env | 1.1.0 | mag (05) |
+| drep | drep_env | 3.6.2 | mag (06) |
+| gtdbtk | gtdbtk27 / gtdbtk | 2.7.2 / 1.2.0 | mag (07) |
+
+**② 跑前检查在真实数据上全部准确**
+- `doctor`：裸 PATH 下正确报告 16 项必需工具缺失；
+- `plan`：正确解析 gtdbtk 为 `ready r232`（经 config `taxonomy_db` 路径），
+  checkm2/eggnog 为 `missing` 并给出 `metaglens db get` 命令；
+- `db list`：`~/gtdbtk_data/release232` 解析为 ready，版本 r232 读自 `metadata/metadata.txt`
+  的 `VERSION_DATA=`（非猜目录名）——真实数据上路径解析链（config→env→scan→default）工作正常。
+
+**③ 设计假设不成立：工具一环一装、高度分散（待裁决，未改设计/代码）**
+
+`fastp`、`seqkit`、`megahit` 分属**三个不同** conda 环境，**没有任何单一环境能跑完
+哪怕一个阶段组**（01_qc 需 fastp；02_assembly 需 megahit+seqkit，二者不同环境）。
+而软件的 conda 模型是 `reuse=单环境` / `create=3 组环境`——**均不匹配这台共享服务器
+"一工具一环境"的实际布局**。目标用户（共享服务器、工具零散）恰恰是这种布局，故此为
+"设计假设不成立"级发现，而非个别 bug。
+
+01→02→03 的真实跑因此**未执行**（用户在此步喊停）。
+
+**候选方向（供用户裁决）**
+1. 支持"每工具/每阶段指定环境"的细粒度 conda 模型；
+2. `doctor` 增加"跨环境拼 PATH"的建议（探测各工具所在环境，给出可粘贴的 PATH）；
+3. 文档明确说明 `reuse` 单环境模式的适用前提（所有工具须在同一环境）。
+
+### Phase 17 — 配置页修复 + Phase 16 文档化（commit `9519932` + `801d70d` + 本备注）
+
+- **17.A**（`9519932`）：`_theme.py` `.logo` 88px→**132px**（约 1.5 倍，用户要求）。
+  共享主题，报告/配置/监控三页一起变大（期望的视觉统一）；header 已有
+  `align-items:center`+`flex-wrap`，不挤压标题；移动端媒体查询加 `.logo{height:96px}`。
+- **17.B**（`801d70d`）：`refreshPlan()` 硬编码 `n=1` 且取了 `samples-box` 从未使用，
+  导致网页并行建议永远按 1 样本算（3 样本会建议 1×112 而非 3×37）。改为用模块级
+  `SAMPLES.length||1`，删除死变量。补回归测试：断言生成 JS 中 `n` 绑定为
+  `SAMPLES.length||1`、旧的 `var n=1;` 与死 fetch 不存在（URL 拼接两版相同，故断言绑定
+  而非 URL）。**已负向验证**：还原旧 bug 该测试失败。顺带自查全页 JS，无其它
+  "取了没用"或硬编码参数。
+- **17.C**：Phase 16 发现整理入上节（工具实测表 + 跑前检查结论 + 多环境分散问题与候选方案）。
+- **17.D 门禁**：`unittest` **249** 全绿（裸解释器，248→249）；`bash -n` 全 14 模板 OK；
+  `compileall` 干净；`python3 -m metaglens.demo` 两路由 PASS。
