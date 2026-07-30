@@ -1551,5 +1551,87 @@ class TestToolchainInstallability(TempDirCase):
         self.assertLessEqual(required, self._all_group_tools())
 
 
+@unittest.skipIf(shutil.which("bash") is None, "bash unavailable")
+class TestStubDemo(unittest.TestCase):
+    """Phase 9.B: the real stage scripts run end-to-end against stub tools."""
+
+    def test_mag_route_end_to_end(self):
+        from metaglens.demo import run_demo
+        res = run_demo("mag_per_sample")
+        self.assertTrue(res["ok"], res["errors"] or res["missing"])
+        self.assertEqual([s["status"] for s in res["stages"]],
+                         ["completed"] * len(res["stages"]))
+        self.assertTrue(res["report_html"])
+        self.assertTrue(res["monitor_html"])
+
+    def test_contig_route_end_to_end(self):
+        """The contig route is the one §7-8 broke, so it must be covered."""
+        from metaglens.demo import run_demo
+        res = run_demo("contig_based")
+        self.assertTrue(res["ok"], res["errors"] or res["missing"])
+        steps = [s["step"] for s in res["stages"]]
+        self.assertIn("09_contig", steps)
+        self.assertIn("10_community", steps)
+
+    def test_contig_route_selects_contig_kraken_source(self):
+        """Regression for §7-8: this branch used to be unreachable dead code."""
+        from metaglens.demo import run_demo
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        res = run_demo("contig_based", workdir=str(d))
+        self.assertTrue(res["ok"], res["errors"])
+        source = (d / "work" / "metaglens_results" / "10_community" /
+                  "SOURCE.txt").read_text(encoding="utf-8")
+        self.assertIn("contig", source.lower())
+        matrix = (d / "work" / "metaglens_results" / "10_community" /
+                  "community_matrix.tsv").read_text(encoding="utf-8")
+        # Header plus at least one data row — the empty-table guard demands it.
+        self.assertGreaterEqual(len(matrix.strip().splitlines()), 2)
+
+    def test_demo_writes_only_inside_its_own_directory(self):
+        from metaglens.demo import run_demo
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        home_before = sorted(p.name for p in Path.home().iterdir())
+        res = run_demo("contig_based", workdir=str(d))
+        self.assertTrue(res["ok"], res["errors"])
+        self.assertEqual(sorted(p.name for p in Path.home().iterdir()), home_before)
+        # Everything produced lives under the given directory.
+        self.assertTrue((d / "work" / "metaglens_results").is_dir())
+
+    def test_report_qc_tab_is_populated(self):
+        """Transitively proves the fastp JSON naming fix (§7-1) still holds."""
+        from metaglens.demo import run_demo
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        res = run_demo("mag_per_sample", workdir=str(d))
+        self.assertTrue(res["ok"], res["errors"])
+        html = Path(res["report_html"]).read_text(encoding="utf-8")
+        payload = json.loads(re.search(r"window\.__MG__=(\{.*?\});", html,
+                                       re.S).group(1))
+        self.assertEqual(len(payload["qc"]), 2)
+        self.assertGreater(payload["qc"][0]["raw_reads"], 0)
+        self.assertTrue(payload["mags"])
+
+    def test_unknown_route_rejected(self):
+        from metaglens.demo import run_demo
+        with self.assertRaises(ValueError):
+            run_demo("no_such_route")
+
+    def test_stub_set_covers_every_required_tool_command(self):
+        """Any tool a demo route needs must have a stub, or the demo is a lie."""
+        from metaglens.demo import stubs
+        from metaglens.sense import tools
+        from metaglens.demo.runner import _make_config, DEMO_ROUTES
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        for route in DEMO_ROUTES:
+            cfg = _make_config(d / route, route, ["s1"])
+            for tool in tools.required_tools(cfg):
+                command = tools.tool_spec(tool).command
+                self.assertIn(command, stubs.STUBS,
+                              f"{route}: no stub for '{command}' ({tool})")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -23,6 +23,7 @@ packages = [
     "metaglens.decide",
     "metaglens.express",
     "metaglens.observe",
+    "metaglens.demo",
 ]
 
 [tool.setuptools.package-data]

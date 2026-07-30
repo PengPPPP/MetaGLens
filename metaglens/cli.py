@@ -496,6 +496,68 @@ def db_get(
         raise typer.Exit(code=2)
 
 
+# ─── demo ────────────────────────────────────────────────────────────────────
+@app.command()
+def demo(
+    route: str = typer.Option("all", "--route",
+                              help="Route to check, or 'all' for every demo route."),
+    keep: bool = typer.Option(False, "--keep", help="Keep the temporary directory."),
+    verbose: bool = typer.Option(False, "--verbose", help="Stream stub output."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Offline self-check: run the pipeline end-to-end with stub tools."""
+    import json as _json
+    from metaglens.demo import DEMO_ROUTES, run_demo
+
+    targets = list(DEMO_ROUTES) if route == "all" else [route]
+    if not as_json:
+        print_banner()
+        _section("Offline self-check (stub toolchain)")
+        console.print(
+            "[dim]Stub tools stand in for fastp/MEGAHIT/CheckM2/... — this checks "
+            "the plumbing only and produces NO scientific results.[/dim]\n"
+        )
+
+    results = []
+    for target in targets:
+        if not as_json:
+            console.print(f"[cyan]▶ {target}[/cyan]")
+        try:
+            res = run_demo(target, keep=keep, verbose=verbose)
+        except ValueError as exc:
+            _fail(str(exc))
+            raise typer.Exit(code=2)
+        results.append(res)
+        if as_json:
+            continue
+        for stage in res["stages"]:
+            icon = "[green]✓[/green]" if stage["status"] == "completed" else "[bold red]✗[/bold red]"
+            console.print(f"   {icon} {stage['step']} "
+                          f"[dim](exit {stage['exit_code']}, {stage['status']})[/dim]")
+        if res["ok"]:
+            _success(f"{target}: all stages completed, artefacts present.")
+        else:
+            for err in res["errors"]:
+                _fail(err)
+            for missing in res["missing"]:
+                _fail(f"expected artefact missing: {missing}")
+            console.print(f"[dim]Left for inspection: {res['root']}[/dim]")
+
+    ok = all(r["ok"] for r in results)
+    if as_json:
+        console.print_json(_json.dumps({"ok": ok, "runs": results},
+                                       ensure_ascii=False))
+    else:
+        console.print()
+        if ok:
+            _success(f"Self-check passed for {len(results)} route(s). "
+                     "MetaGLens is wired up correctly on this machine.")
+            console.print("[dim]Reminder: stub tools — no scientific output.[/dim]")
+        else:
+            _fail("Self-check failed. See the messages above.")
+    raise typer.Exit(code=0 if ok else 2)
+
+
 # ─── plan ────────────────────────────────────────────────────────────────────
 @app.command()
 def plan(

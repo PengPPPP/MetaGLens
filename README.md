@@ -32,6 +32,7 @@ the environments during setup.
 
 ```bash
 metaglens init                 # interactive wizard -> writes metaglens.yaml
+metaglens demo                 # offline self-check with stub tools (no science)
 metaglens configure            # OR configure in a local web page (loopback + token)
 metaglens doctor               # check tools / databases / hardware for this route
 metaglens db list              # which reference databases this route needs
@@ -53,6 +54,32 @@ metaglens setup-env            # one-shot conda environment creation
 All commands accept `-c/--config PATH` (default `metaglens.yaml`).
 `--only` and `--from` steps are validated against the selected route, so a
 misspelled stage id fails fast instead of silently running nothing.
+
+## Self-check: `metaglens demo`
+
+After installing, this is the first thing to run:
+
+```bash
+metaglens demo                       # both routes, a few seconds
+metaglens demo --route contig_based  # one route
+metaglens demo --keep                # keep the temp dir for inspection
+metaglens demo --json                # machine-readable result
+python3 -m metaglens.demo            # no typer/rich needed (CI-friendly)
+```
+
+It creates a throwaway project with synthetic reads, renders the **real** stage
+scripts, and runs them to completion against a **stub toolchain** — so stage
+control flow, the resumable status file, product validation, and both the
+delivery report and the monitor page are all exercised for real, not merely
+syntax-checked. It needs no conda environment, no reference databases, and no
+network, and it only ever writes inside its own temporary directory.
+
+> **It produces no scientific results.** Every tool is a stub emitting the
+> minimal artefact the next stage reads; all sequences and numbers are
+> placeholders. `demo` proves the plumbing works — nothing about biology.
+
+Both `mag_per_sample` and `contig_based` are covered, so the whole
+delivery chain (including the community-table source selection) is verified.
 
 ## Preflight: doctor / db / plan
 
