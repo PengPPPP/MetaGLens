@@ -1890,5 +1890,140 @@ class TestQualityGates(TempDirCase):
         self.assertTrue(payload["gates"]["gates"])
 
 
+class TestFailureDiagnosis(TempDirCase):
+    """Phase 11: exit codes and log tails become actionable diagnoses."""
+
+    def _results(self, stage="02_assembly", log="", status=None) -> Path:
+        r = self.tmp / "dres"
+        (r / "reports" / "logs").mkdir(parents=True, exist_ok=True)
+        if log:
+            (r / "reports" / "logs" / f"{stage}.log").write_text(log, encoding="utf-8")
+        (r / "pipeline_status.json").write_text(
+            json.dumps(status or {"steps": {}}), encoding="utf-8")
+        return r
+
+    def test_all_rules_are_well_formed(self):
+        from metaglens.decide import diagnose as dg
+        rules = dg.load_rules()
+        self.assertGreaterEqual(len(rules), 10)
+        seen = set()
+        for rule in rules:
+            for key in ("id", "match", "class", "title", "diagnosis", "actions"):
+                self.assertIn(key, rule, rule.get("id"))
+            self.assertNotIn(rule["id"], seen, "duplicate rule id")
+            seen.add(rule["id"])
+            self.assertIn(rule["class"],
+                          ("script_defect", "environment", "data_config"))
+            self.assertTrue(rule["actions"], rule["id"])
+
+    def test_exit_137_is_oom(self):
+        from metaglens.decide import diagnose as dg
+        r = self._results(log="megahit: assembling\n")
+        diag = dg.diagnose(r, "02_assembly", exit_code=137)
+        self.assertEqual(diag.rule_id, "oom.killed")
+        self.assertEqual(diag.failure_class, "environment")
+        self.assertIn("OOM", diag.title)
+        # It must offer a safe automatic action for the repair layer.
+        self.assertTrue(diag.auto_actions())
+        self.assertEqual(diag.auto_actions()[0]["op"], "reduce_parallel")
+
+    def test_database_signatures(self):
+        from metaglens.decide import diagnose as dg
+        cases = {
+            "ERROR: GTDBTK_DATA_PATH is not set": "db.gtdbtk_missing",
+            "checkm2: DIAMOND database not found": "db.checkm2_missing",
+            "kraken2: cannot open database hash.k2d": "db.kraken2_missing",
+            "eggnog data not found in /x": "db.eggnog_missing",
+        }
+        for log, expected in cases.items():
+            with self.subTest(rule=expected):
+                r = self._results(stage="07_taxonomy", log=log + "\n")
+                diag = dg.diagnose(r, "07_taxonomy", exit_code=1)
+                self.assertEqual(diag.rule_id, expected)
+                self.assertTrue(diag.human_actions())
+
+    def test_infrastructure_signatures(self):
+        from metaglens.decide import diagnose as dg
+        cases = {
+            "samtools sort: No space left on device": "disk.full",
+            "line 42: fastp: command not found": "tool.not_found",
+            "mkdir: cannot create directory: Permission denied": "permission.denied",
+            "ls: cannot access '/x/*.fa': No such file or directory": "glob.unmatched",
+        }
+        for log, expected in cases.items():
+            with self.subTest(rule=expected):
+                r = self._results(stage="03_mapping", log=log + "\n")
+                diag = dg.diagnose(r, "03_mapping", exit_code=1)
+                self.assertEqual(diag.rule_id, expected)
+
+    def test_unknown_failure_degrades_without_inventing_a_cause(self):
+        from metaglens.decide import diagnose as dg
+        r = self._results(log="some totally unrecognised message\nand another\n")
+        diag = dg.diagnose(r, "02_assembly", exit_code=3)
+        self.assertFalse(diag.matched)
+        self.assertEqual(diag.rule_id, "")
+        self.assertEqual(diag.failure_class, "unknown")
+        self.assertIn("Unknown failure", diag.title)
+        # It must still hand over evidence and the log location.
+        self.assertTrue(diag.evidence)
+        self.assertTrue(diag.log_file)
+        # And must never claim a specific cause.
+        for word in ("memory", "database", "disk", "permission"):
+            self.assertNotIn(word, diag.diagnosis.lower())
+
+    def test_product_validation_failure_takes_precedence(self):
+        from metaglens.decide import diagnose as dg
+        status = {"steps": {"10_community": {
+            "status": "failed",
+            "product_validation": {"ok": False, "failures": [
+                "community_matrix.tsv has 0 data row(s), expected >= 1"]}}}}
+        r = self._results(stage="10_community", log="killed\n", status=status)
+        diag = dg.diagnose(r, "10_community", exit_code=137, status=status)
+        self.assertEqual(diag.rule_id, "products.invalid")
+        self.assertIn("0 data row", " ".join(diag.evidence))
+
+    def test_actions_include_runnable_commands(self):
+        """The third part of the message must be copy-pasteable."""
+        from metaglens.decide import diagnose as dg
+        r = self._results(stage="07_taxonomy",
+                          log="ERROR: GTDBTK_DATA_PATH not set\n")
+        diag = dg.diagnose(r, "07_taxonomy", exit_code=1)
+        joined = " ".join(diag.human_actions())
+        self.assertIn("metaglens db", joined)
+
+    def test_reads_status_when_exit_code_not_given(self):
+        from metaglens.decide import diagnose as dg
+        status = {"steps": {"02_assembly": {
+            "status": "failed",
+            "last_failure": {"exit_code": 137, "command": "megahit ...",
+                             "line": "88"}}}}
+        r = self._results(log="assembling\n", status=status)
+        diag = dg.diagnose(r, "02_assembly", status=status)
+        self.assertEqual(diag.exit_code, 137)
+        self.assertEqual(diag.rule_id, "oom.killed")
+        self.assertIn("megahit", diag.failed_command)
+
+    def test_failed_stages_listed_in_order(self):
+        from metaglens.decide import diagnose as dg
+        status = {"selected_steps": ["01_qc", "02_assembly", "03_mapping"],
+                  "steps": {"01_qc": {"status": "completed"},
+                            "02_assembly": {"status": "failed"},
+                            "03_mapping": {"status": "failed"}}}
+        self.assertEqual(dg.failed_stages(status), ["02_assembly", "03_mapping"])
+
+    def test_diagnosis_is_json_serialisable(self):
+        from metaglens.decide import diagnose as dg
+        r = self._results(log="killed\n")
+        payload = dg.diagnose(r, "02_assembly", exit_code=137).as_dict()
+        self.assertEqual(json.loads(json.dumps(payload))["id"], "oom.killed")
+
+    def test_missing_log_does_not_crash(self):
+        from metaglens.decide import diagnose as dg
+        r = self._results(log="")
+        diag = dg.diagnose(r, "05_checkm", exit_code=1)
+        self.assertFalse(diag.matched)
+        self.assertTrue(diag.actions)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

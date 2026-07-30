@@ -98,6 +98,49 @@ def _fail(msg: str) -> None:
     console.print(f"[bold red]✗[/bold red] {msg}")
 
 
+def _fail3(what: str, why: str = "", nexts: Optional[list] = None) -> None:
+    """Three-part failure: what happened / why / what to run next.
+
+    A bare error message leaves a newcomer stuck; the point of the third part is
+    that it can be copied straight into the terminal.
+    """
+    console.print(f"[bold red]✗[/bold red] {what}")
+    if why:
+        console.print(f"  [bold]Why:[/bold] {why}")
+    for step in (nexts or []):
+        console.print(f"  [bold]Next:[/bold] [cyan]{step}[/cyan]")
+
+
+def _print_diagnosis(diag) -> None:
+    """Render a decide.diagnose.Diagnosis in the three-part shape."""
+    header = f"{diag.stage} failed"
+    if diag.exit_code is not None:
+        header += f" (exit {diag.exit_code})"
+    console.print(f"\n[bold red]✗[/bold red] {header}")
+    console.print(f"  [bold]Cause:[/bold] {diag.class_label} — {diag.title}")
+    if diag.diagnosis:
+        console.print(f"  [dim]{diag.diagnosis}[/dim]")
+    for line in diag.evidence:
+        console.print(f"  [bold]Evidence:[/bold] [dim]{line}[/dim]")
+    if diag.failed_command:
+        location = f" (line {diag.log_line})" if diag.log_line else ""
+        console.print(f"  [bold]Command:[/bold] [dim]{diag.failed_command}{location}[/dim]")
+    if diag.log_file:
+        console.print(f"  [bold]Log:[/bold] [dim]{diag.log_file}[/dim]")
+    for action in diag.actions:
+        text = action.get("text", "")
+        if not text:
+            continue
+        if action.get("kind") == "auto":
+            console.print(f"  [bold]Next:[/bold] {text} "
+                          f"[dim](metaglens run --auto-repair 1)[/dim]")
+        else:
+            console.print(f"  [bold]Next:[/bold] {text}")
+    if not diag.matched:
+        console.print("  [dim]No known signature matched, so no cause is being "
+                      "guessed — the evidence above is what was recorded.[/dim]")
+
+
 # ─── Callback ────────────────────────────────────────────────────────────────
 def _version_callback(value: bool) -> None:
     if value:
@@ -496,6 +539,55 @@ def db_get(
         raise typer.Exit(code=2)
 
 
+# ─── diagnose ────────────────────────────────────────────────────────────────
+@app.command()
+def diagnose(
+    config: str = ConfigOpt,
+    stage: Optional[str] = typer.Option(None, "--stage",
+                                        help="Stage id (default: whatever failed)."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Explain why a stage failed, and what to do about it."""
+    import json as _json
+    from metaglens.decide import diagnose as diag_mod
+
+    cfg = _load_config(config)
+    results = cfg.results_dir
+    if not results.is_dir():
+        _fail3("No results directory yet.",
+               "Nothing has run, so there is nothing to diagnose.",
+               ["metaglens run"])
+        raise typer.Exit(code=2)
+
+    status = pipeline.read_status(cfg) or {}
+    stages = [stage] if stage else diag_mod.failed_stages(status)
+
+    if not stages:
+        if as_json:
+            console.print_json(_json.dumps({"failed": [], "diagnoses": []},
+                                           ensure_ascii=False))
+        else:
+            _success("No failed stage recorded.")
+            console.print("[dim]Pass --stage to inspect a specific stage anyway.[/dim]")
+        raise typer.Exit(code=0)
+
+    diagnoses = [diag_mod.diagnose(results, s, status=status) for s in stages]
+
+    if as_json:
+        console.print_json(_json.dumps(
+            {"failed": stages, "diagnoses": [d.as_dict() for d in diagnoses]},
+            ensure_ascii=False))
+        raise typer.Exit(code=0)
+
+    print_banner()
+    _section("Failure diagnosis")
+    for diag in diagnoses:
+        _print_diagnosis(diag)
+        if diag.rule_id:
+            console.print(f"  [dim]More: metaglens explain {diag.rule_id}[/dim]")
+    raise typer.Exit(code=0)
+
+
 # ─── gate ────────────────────────────────────────────────────────────────────
 @app.command()
 def gate(
@@ -804,7 +896,12 @@ def run(
             rc = pipeline.run_step(cfg, step_id)
             progress.update(task, completed=1, total=1)
         if rc != 0:
-            _fail(f"{step_id} failed (exit {rc}). Check reports/logs/.")
+            from metaglens.decide import diagnose as diag_mod
+            diag = diag_mod.diagnose(cfg.results_dir, step_id, exit_code=rc)
+            _print_diagnosis(diag)
+            console.print(f"\n[dim]Full detail: [cyan]metaglens diagnose[/cyan]"
+                          + (f" · [cyan]metaglens explain {diag.rule_id}[/cyan]"
+                             if diag.rule_id else "") + "[/dim]")
             raise typer.Exit(code=2)
         _success(f"{step_id} completed.")
 

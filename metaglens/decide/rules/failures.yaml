@@ -1,0 +1,208 @@
+# Failure signatures — how to turn an exit code and a log tail into a diagnosis.
+#
+# Each rule carries:
+#   id         stable identifier (also an `explain` topic)
+#   match      exit_code and/or log_regex (case-insensitive); all given keys must hold
+#   class      script_defect | environment | data_config
+#   title      one line, plain language
+#   diagnosis  what this actually means
+#   actions    what to do; kind: auto (a safe resource change the repair layer
+#              may apply) or human (needs a decision or a command)
+#
+# Ordering matters: the first matching rule wins, so put specific signatures
+# before generic ones. A stage that matches nothing must degrade to "unknown
+# failure + where the log is" — never invent a cause.
+
+- id: oom.killed
+  match:
+    exit_code: 137
+  class: environment
+  title: The process was killed by the OOM killer
+  diagnosis: >-
+    Exit 137 is SIGKILL (128+9), which on a Linux host almost always means the
+    kernel killed the process for exceeding available memory. Peak memory times
+    the number of concurrent jobs is the figure that matters, not per-job memory
+    alone.
+  actions:
+    - kind: auto
+      op: reduce_parallel
+      factor: 0.5
+      safe: true
+      text: Halve the number of concurrent jobs and re-run this stage only.
+    - kind: human
+      text: "Or raise `memory:` in metaglens.yaml (schedulers) and re-run the stage."
+    - kind: human
+      text: "Check the estimate first: metaglens plan"
+
+- id: oom.log_message
+  match:
+    log_regex: "out of memory|cannot allocate memory|std::bad_alloc|MemoryError|Killed process"
+  class: environment
+  title: A tool reported that it ran out of memory
+  diagnosis: >-
+    The tool itself reported an allocation failure rather than being killed
+    outright. Assemblers and Kraken2 are the usual candidates: Kraken2 loads its
+    whole index into RAM, so an index larger than available memory cannot work
+    at any thread count.
+  actions:
+    - kind: auto
+      op: reduce_parallel
+      factor: 0.5
+      safe: true
+      text: Reduce concurrency and re-run this stage.
+    - kind: human
+      text: "For Kraken2, pick a smaller index variant that fits RAM (metaglens db list)."
+
+- id: db.gtdbtk_missing
+  match:
+    log_regex: "GTDBTK_DATA_PATH|gtdbtk.*(database|reference).*(not|cannot)|Cannot find.*gtdbtk"
+  class: environment
+  title: The GTDB-Tk reference database is not configured
+  diagnosis: >-
+    GTDB-Tk resolves its reference data through GTDBTK_DATA_PATH. The path is
+    unset, wrong, or points at a directory that is not a GTDB-Tk release.
+  actions:
+    - kind: human
+      text: "See where it is being looked for: metaglens db where gtdbtk"
+    - kind: human
+      text: "If a copy already exists on this machine, point at it (the scan often finds one)."
+    - kind: human
+      text: "Otherwise: metaglens db get gtdbtk <dir>   (~110 GB)"
+
+- id: db.checkm2_missing
+  match:
+    log_regex: "checkm2.*database|DIAMOND database.*not|CHECKM2DB"
+  class: environment
+  title: The CheckM2 database is not available
+  diagnosis: CheckM2 needs its DIAMOND database, passed via --database_path.
+  actions:
+    - kind: human
+      text: "metaglens db where checkm2"
+    - kind: human
+      text: "metaglens db get checkm2 <dir>   (~3 GB)"
+
+- id: db.kraken2_missing
+  match:
+    log_regex: "kraken2.*(no such|cannot|unable).*(database|index)|hash\\.k2d"
+  class: environment
+  title: The Kraken2 index is missing or incomplete
+  diagnosis: >-
+    Kraken2 needs hash.k2d, opts.k2d and taxo.k2d in its database directory.
+    A partially downloaded index fails exactly like a missing one.
+  actions:
+    - kind: human
+      text: "metaglens db verify kraken2 <dir>"
+    - kind: human
+      text: "metaglens db get kraken2 <dir>"
+
+- id: db.eggnog_missing
+  match:
+    log_regex: "eggnog.*(data|database).*(not found|missing)|EGGNOG_DATA_DIR|eggnog\\.db"
+  class: environment
+  title: The eggNOG data directory is missing
+  diagnosis: eggNOG-mapper needs eggnog.db plus its DIAMOND database.
+  actions:
+    - kind: human
+      text: "metaglens db where eggnog"
+    - kind: human
+      text: "metaglens db get eggnog <dir>   (~50 GB)"
+
+- id: disk.full
+  match:
+    log_regex: "no space left on device|disk quota exceeded|write error.*no space"
+  class: environment
+  title: The filesystem ran out of space
+  diagnosis: >-
+    Intermediate files (BAMs and assembly graphs above all) dominate disk use.
+    Note that extracting a database transiently needs about twice its final size.
+  actions:
+    - kind: human
+      text: "Check the estimate against free space: metaglens plan"
+    - kind: human
+      text: Free space or move work_dir to a larger filesystem, then resume.
+    - kind: human
+      text: "metaglens resume   (completed stages are not re-run)"
+
+- id: glob.unmatched
+  match:
+    log_regex: "(no such file or directory|cannot access|cannot open).*\\*|\\*.*(no such file or directory|matches no files)"
+  class: script_defect
+  title: A wildcard matched nothing
+  diagnosis: >-
+    A stage expected files that are not there, which normally means the upstream
+    stage produced nothing rather than that this stage is wrong.
+  actions:
+    - kind: human
+      text: "Find the empty producer: metaglens gate"
+    - kind: human
+      text: "Check the upstream stage's products before re-running this one."
+
+- id: tool.not_found
+  match:
+    log_regex: "command not found|No such file or directory: '?[a-z0-9_.-]+'?$|executable not found"
+  class: environment
+  title: A required tool is not on PATH
+  diagnosis: >-
+    The stage could not find an executable. A conda environment that contains
+    the package is not enough — it has to be activated, or the command has to be
+    on PATH for the shell that runs the script.
+  actions:
+    - kind: human
+      text: "See what is actually runnable: metaglens doctor"
+    - kind: human
+      text: "Install only what is missing: metaglens doctor --fix"
+
+- id: permission.denied
+  match:
+    log_regex: "permission denied|operation not permitted|read-only file system"
+  class: environment
+  title: Permission was denied
+  diagnosis: >-
+    Either an output directory is not writable, or something tried to write into
+    a shared read-only location. Reference databases owned by someone else are
+    the common case and must only ever be read.
+  actions:
+    - kind: human
+      text: Check ownership of work_dir and of any path the stage writes to.
+    - kind: human
+      text: MetaGLens never writes into a database directory; report it if a stage does.
+
+- id: input.missing_reads
+  match:
+    log_regex: "reads not found|Raw reads not found|QC reads not found"
+  class: data_config
+  title: Input reads were not found where the stage expected them
+  diagnosis: >-
+    The sample manifest points at files that are absent, or an upstream stage
+    did not write the cleaned reads it was supposed to.
+  actions:
+    - kind: human
+      text: Check samples.tsv paths still resolve (moved or unmounted data?).
+    - kind: human
+      text: "metaglens validate"
+
+- id: status.missing
+  match:
+    log_regex: "pipeline_status.json not found|Run 00_setup.sh first"
+  class: script_defect
+  title: The pipeline state file is missing
+  diagnosis: >-
+    Stages read pipeline_status.json to know what has run. Running a stage
+    directly before 00_setup, or from the wrong directory, produces this.
+  actions:
+    - kind: human
+      text: "metaglens run --only 00_setup"
+    - kind: human
+      text: Run stage scripts from inside metaglens_results/.
+
+- id: timeout.walltime
+  match:
+    log_regex: "DUE TO TIME LIMIT|walltime|job exceeded.*time"
+  class: environment
+  title: The scheduler killed the job for exceeding its time limit
+  diagnosis: The wall-clock request was lower than the stage actually needed.
+  actions:
+    - kind: human
+      text: "Get a defensible estimate for the request: metaglens plan --plain"
+    - kind: human
+      text: Raise the time limit and resume; completed stages are not re-run.
