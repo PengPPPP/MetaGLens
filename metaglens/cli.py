@@ -155,8 +155,15 @@ def main_callback(
         False, "--version", callback=_version_callback, is_eager=True,
         help="Show version and exit.",
     ),
+    lang: Optional[str] = typer.Option(
+        None, "--lang", help="Interactive language: en or zh (deliverables stay English).",
+    ),
 ) -> None:
     """Reproducible shotgun-metagenomics pipeline orchestrator."""
+    from metaglens.express import i18n, profile as profile_mod
+    # Precedence: explicit flag > remembered profile > locale environment.
+    i18n.set_language(lang or profile_mod.load().get("lang") or i18n.detect())
+
     if ctx.invoked_subcommand is None:
         print_banner()
         console.print(ctx.get_help())
@@ -539,6 +546,56 @@ def db_get(
         raise typer.Exit(code=2)
 
 
+# ─── explain ─────────────────────────────────────────────────────────────────
+@app.command()
+def explain(
+    topic: Optional[str] = typer.Argument(None,
+                                          help="Stage, parameter, failure id, or concept."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Look up what a stage does, what a parameter means, or what a failure was."""
+    import json as _json
+    from metaglens.express import explain as explain_mod
+
+    if not topic:
+        all_topics = explain_mod.topics()
+        if as_json:
+            console.print_json(_json.dumps({"topics": all_topics},
+                                           ensure_ascii=False))
+            return
+        _section("Explain — available topics")
+        stages = [t for t in all_topics if t[0].isdigit() or t == "mag_abundance"]
+        failures = [t for t in all_topics if "." in t]
+        others = [t for t in all_topics
+                  if t not in stages and t not in failures]
+        for label, group in (("Stages", stages),
+                             ("Parameters & concepts", others),
+                             ("Failure ids", failures)):
+            if group:
+                console.print(f"\n[bold]{label}[/bold]")
+                console.print("  " + "  ".join(group))
+        console.print("\n[dim]Usage: metaglens explain <topic>[/dim]")
+        return
+
+    entry = explain_mod.lookup(topic)
+    if entry is None:
+        options = explain_mod.candidates(topic)
+        _fail3(f"No entry for '{topic}'.",
+               "The knowledge base has no topic by that name.",
+               ([f"metaglens explain {options[0]}"] if options
+                else ["metaglens explain"]))
+        if options:
+            console.print(f"  [dim]Close matches: {', '.join(options)}[/dim]")
+        raise typer.Exit(code=2)
+
+    if as_json:
+        console.print_json(_json.dumps(entry, ensure_ascii=False))
+        return
+    # print(): the body is prose, and Rich markup would mangle bracketed text.
+    print()
+    print(explain_mod.render_text(entry), end="")
+
+
 # ─── diagnose ────────────────────────────────────────────────────────────────
 @app.command()
 def diagnose(
@@ -819,10 +876,36 @@ def plan(
 
 # ─── validate ────────────────────────────────────────────────────────────────
 @app.command()
-def validate(config: str = ConfigOpt) -> None:
+def validate(
+    config: str = ConfigOpt,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
     """Validate configuration and dry-render every stage script."""
     cfg = _load_config(config)
     errors = cfg.validate()
+
+    if as_json:
+        import json as _json
+        rendered, render_errors = [], []
+        samples: list = []
+        if not errors:
+            try:
+                samples = [s.sample_id for s in pipeline.resolve_samples(cfg)]
+            except Exception as exc:
+                render_errors.append(f"sample resolution failed: {exc}")
+            if not render_errors:
+                for step_id in cfg.route.steps:
+                    try:
+                        render.render_step(cfg, step_id, samples)
+                        rendered.append(step_id)
+                    except RenderError as exc:
+                        render_errors.append(f"{step_id}: {exc}")
+        payload = {"ok": not errors and not render_errors,
+                   "config_errors": errors, "render_errors": render_errors,
+                   "rendered": rendered, "samples": samples}
+        console.print_json(_json.dumps(payload, ensure_ascii=False))
+        raise typer.Exit(code=0 if payload["ok"] else 2)
+
     if errors:
         _section("Validation errors")
         for e in errors:
@@ -948,11 +1031,33 @@ def resume(config: str = ConfigOpt) -> None:
 
 # ─── status ──────────────────────────────────────────────────────────────────
 @app.command()
-def status(config: str = ConfigOpt) -> None:
+def status(
+    config: str = ConfigOpt,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
     """Show pipeline stage progress."""
     cfg = _load_config(config)
     data = pipeline.read_status(cfg)
     route = cfg.route
+
+    if as_json:
+        import json as _json
+        steps = (data or {}).get("steps", {})
+        payload = {
+            "project": cfg.project_name,
+            "route": route.name,
+            "steps": [
+                {"step": s,
+                 "script": routes.STEPS[s].script,
+                 "status": steps.get(s, {}).get("status", "pending"),
+                 "attempts": steps.get(s, {}).get("attempts", 0)}
+                for s in route.steps
+            ],
+            "last_failure": (data or {}).get("last_failure", {}),
+            "gates": (data or {}).get("gates", {}),
+        }
+        console.print_json(_json.dumps(payload, ensure_ascii=False))
+        return
 
     table = Table(title=f"{cfg.project_name} — {route.name}")
     table.add_column("Stage", style="cyan")

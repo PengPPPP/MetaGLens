@@ -28,3 +28,5 @@ packages = [
 
 [tool.setuptools.package-data]
 metaglens = ["templates/*.sh", "templates/*.b64", "templates/*.md"]
+"metaglens.decide" = ["rules/*.yaml"]
+"metaglens.express" = ["knowledge/*.yaml"]

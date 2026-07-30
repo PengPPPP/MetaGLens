@@ -2025,5 +2025,194 @@ class TestFailureDiagnosis(TempDirCase):
         self.assertTrue(diag.actions)
 
 
+class TestSuggestions(TempDirCase):
+    """Phase 12.1: typos get a nudge, not a wall of valid values."""
+
+    def test_step_typo_suggests_step(self):
+        from metaglens.express.suggest import suggest
+        self.assertIn("04_binning", suggest("04_bining", routes.STEPS))
+
+    def test_route_typo_suggests_route(self):
+        with self.assertRaises(ValueError) as ctx:
+            routes.resolve_route("contig_base")
+        self.assertIn("contig_based", str(ctx.exception))
+        self.assertIn("Did you mean", str(ctx.exception))
+
+    def test_select_steps_typo_suggests(self):
+        cfg = self.make_cfg()
+        with self.assertRaises(pipeline.PipelineError) as ctx:
+            pipeline.select_steps(cfg, only=["04_bining"])
+        self.assertIn("04_binning", str(ctx.exception))
+        with self.assertRaises(pipeline.PipelineError) as ctx:
+            pipeline.select_steps(cfg, from_step="02_assembl")
+        self.assertIn("02_assembly", str(ctx.exception))
+
+    def test_unknown_config_key_suggests(self):
+        cfg_path = self.tmp / "typo.yaml"
+        cfg_path.write_text("project_name: p\ntotal_thread: 8\n", encoding="utf-8")
+        with self.assertRaises(ValueError) as ctx:
+            Config.from_yaml(str(cfg_path))
+        self.assertIn("total_threads", str(ctx.exception))
+
+    def test_validate_reports_route_and_step_suggestions(self):
+        cfg = self.make_cfg(route_name="mag_per_sampl")
+        self.assertTrue(any("mag_per_sample" in e for e in cfg.validate()))
+        cfg2 = self.make_cfg(route_name="custom", custom_steps=["01_q"])
+        self.assertTrue(any("01_qc" in e for e in cfg2.validate()))
+
+    def test_nonsense_gets_no_false_suggestion(self):
+        from metaglens.express.suggest import suggest
+        self.assertEqual(suggest("zzzzzzzz", routes.STEPS), "")
+
+    def test_substring_fallback(self):
+        from metaglens.express.suggest import suggest
+        # Too different for difflib's ratio, but an obvious truncation.
+        self.assertIn("07_taxonomy", suggest("taxonomy", routes.STEPS))
+
+
+class TestUserProfile(TempDirCase):
+    """Phase 12.2: the profile supplies defaults and never overrides."""
+
+    def test_roundtrip(self):
+        from metaglens.express import profile
+        path = self.tmp / "profile.yaml"
+        self.assertTrue(profile.save({"total_threads": 32,
+                                      "db_dir": "/shared/db"}, path))
+        loaded = profile.load(path)
+        self.assertEqual(loaded["total_threads"], 32)
+        self.assertEqual(loaded["db_dir"], "/shared/db")
+
+    def test_only_remembered_keys_persist(self):
+        from metaglens.express import profile
+        path = self.tmp / "p.yaml"
+        profile.save({"total_threads": 8, "project_name": "leaked",
+                      "raw_data_dir": "/nope"}, path)
+        loaded = profile.load(path)
+        self.assertIn("total_threads", loaded)
+        self.assertNotIn("project_name", loaded)
+        self.assertNotIn("raw_data_dir", loaded)
+
+    def test_defaults_do_not_override_explicit_values(self):
+        from metaglens.express import profile
+        path = self.tmp / "p2.yaml"
+        profile.save({"total_threads": 64, "db_dir": "/from/profile"}, path)
+        defaults = profile.defaults_for({"total_threads": 8}, path)
+        self.assertNotIn("total_threads", defaults)   # explicit wins
+        self.assertEqual(defaults["db_dir"], "/from/profile")  # gap filled
+
+    def test_corrupt_profile_degrades_silently(self):
+        from metaglens.express import profile
+        path = self.tmp / "bad.yaml"
+        path.write_text("this: [is: not: valid: yaml", encoding="utf-8")
+        self.assertEqual(profile.load(path), {})
+
+    def test_missing_profile_is_empty_not_an_error(self):
+        from metaglens.express import profile
+        self.assertEqual(profile.load(self.tmp / "absent.yaml"), {})
+
+    def test_honours_xdg_config_home(self):
+        from metaglens.express import profile
+        with unittest.mock.patch.dict("os.environ",
+                                      {"XDG_CONFIG_HOME": str(self.tmp / "xdg")}):
+            self.assertTrue(str(profile.profile_path()).startswith(
+                str(self.tmp / "xdg")))
+
+
+class TestI18n(unittest.TestCase):
+    """Phase 12.3: interactive language only; deliverables stay English."""
+
+    def test_translation_and_fallback(self):
+        from metaglens.express import i18n
+        self.assertNotEqual(i18n.t("gate.all_passed", "zh"),
+                            i18n.t("gate.all_passed", "en"))
+        # Unknown key degrades to the key, never raises.
+        self.assertEqual(i18n.t("no.such.key", "zh"), "no.such.key")
+
+    def test_every_english_key_has_a_chinese_entry(self):
+        from metaglens.express import i18n
+        missing = set(i18n.MESSAGES["en"]) - set(i18n.MESSAGES["zh"])
+        self.assertEqual(missing, set(), f"untranslated: {missing}")
+
+    def test_language_detection_precedence(self):
+        from metaglens.express import i18n
+        self.assertEqual(i18n.detect(cli_lang="zh",
+                                     env={"LANG": "en_US.UTF-8"}), "zh")
+        self.assertEqual(i18n.detect(env={"LANG": "zh_CN.UTF-8"}), "zh")
+        self.assertEqual(i18n.detect(env={}), "en")
+        self.assertEqual(i18n.normalise("ZH-Hans"), "zh")
+
+    def test_deliverables_stay_english_regardless_of_language(self):
+        from metaglens.express import i18n
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        (d / "pipeline_status.json").write_text(json.dumps({
+            "project_name": "demo", "route_name": "mag_per_sample",
+            "selected_steps": [], "steps": {}}), encoding="utf-8")
+        (d / "delivery" / "community").mkdir(parents=True)
+        (d / "delivery" / "community" / "community_matrix.tsv").write_text(
+            "taxon\tA\ns__Foo\t1\n", encoding="utf-8")
+        i18n.set_language("zh")
+        try:
+            html = generate_report(d, raw_data_dir="/x").read_text(encoding="utf-8")
+        finally:
+            i18n.set_language("en")
+        # The report's own chrome must remain English.
+        self.assertIn("MetaGLens Delivery Report", html)
+        self.assertIn("Analysis-ready package", html)
+
+
+class TestExplainKnowledge(unittest.TestCase):
+    """Phase 12.4: domain knowledge as an offline, data-driven asset."""
+
+    def test_knowledge_is_a_data_file(self):
+        from metaglens.express import explain
+        self.assertTrue(explain.knowledge_path().is_file())
+        self.assertTrue(str(explain.knowledge_path()).endswith(".yaml"))
+
+    def test_all_twelve_stages_are_covered(self):
+        from metaglens.express import explain
+        available = set(explain.topics())
+        for step in routes.STEPS:
+            self.assertIn(step, available, f"no explain entry for {step}")
+
+    def test_key_scientific_parameters_are_covered(self):
+        from metaglens.express import explain
+        available = set(explain.topics())
+        for param in ("completeness_min", "contamination_max", "ani_threshold",
+                      "min_contig_len", "min_length", "quality_threshold"):
+            self.assertIn(param, available, param)
+
+    def test_failure_ids_are_explainable(self):
+        from metaglens.express import explain
+        from metaglens.decide import diagnose as dg
+        available = set(explain.topics())
+        # At least the signatures a newcomer is most likely to hit.
+        for rule_id in ("oom.killed", "db.gtdbtk_missing", "disk.full",
+                        "glob.unmatched", "products.invalid"):
+            self.assertIn(rule_id, available, rule_id)
+        self.assertIn("oom.killed", {r["id"] for r in dg.load_rules()})
+
+    def test_every_entry_has_title_and_summary(self):
+        from metaglens.express import explain
+        for topic, entry in explain.load_topics().items():
+            self.assertTrue(entry.get("title"), topic)
+            self.assertTrue(entry.get("summary"), topic)
+
+    def test_mimag_thresholds_are_stated(self):
+        from metaglens.express import explain
+        text = explain.render_text(explain.lookup("completeness_min"))
+        self.assertIn("MIMAG", text)
+        self.assertIn("90", text)
+
+    def test_unknown_topic_offers_candidates(self):
+        from metaglens.express import explain
+        self.assertIsNone(explain.lookup("no_such_topic_at_all"))
+        self.assertIn("completeness_min", explain.candidates("completness"))
+
+    def test_lookup_is_case_insensitive(self):
+        from metaglens.express import explain
+        self.assertIsNotNone(explain.lookup("MIMAG"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

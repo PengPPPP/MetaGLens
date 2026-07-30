@@ -1,0 +1,291 @@
+# Offline knowledge base for `metaglens explain`.
+#
+# This is where the domain knowledge from the skill bundle is kept as an asset
+# rather than scattered through prompts: stage purposes, the science behind the
+# parameters people are most likely to change, and the failure ids diagnose.py
+# can report. It is a data file on purpose — anyone can correct or extend an
+# entry without touching Python.
+#
+# Each topic: title, summary, and optionally pitfalls / tradeoffs / see_also.
+
+# ── Stages ──────────────────────────────────────────────────────────────────
+00_setup:
+  title: "Stage 00 — project setup"
+  summary: >-
+    Creates the results tree, writes samples.tsv and pipeline_status.json, records
+    tool versions, and (optionally) prepares database directories. Every later
+    stage reads pipeline_status.json to know what has already run, which is what
+    makes the pipeline resumable.
+  pitfalls:
+    - Running a later stage before 00_setup fails with "pipeline_status.json not found".
+    - Stage scripts expect to run from inside metaglens_results/.
+
+01_qc:
+  title: "Stage 01 — read quality control (fastp)"
+  summary: >-
+    Trims adapters and low-quality bases, drops short reads, and optionally
+    depletes host and PhiX sequences. Everything downstream inherits whatever
+    this stage lets through, so it is the cheapest place to catch bad data.
+  pitfalls:
+    - "Retention below ~70% usually means adapter contamination or thresholds too strict for the data."
+    - Host depletion runs after fastp, so read counts are recounted from the final files.
+  see_also: [quality_threshold, min_length, qc.retention_rate]
+
+02_assembly:
+  title: "Stage 02 — assembly (MEGAHIT or metaSPAdes)"
+  summary: >-
+    Assembles cleaned reads into contigs, per sample or as a co-assembly. Contig
+    contiguity caps everything after it: fragmented contigs cannot be binned into
+    good genomes no matter how well the binners perform.
+  pitfalls:
+    - "metaSPAdes gives better contiguity but needs far more memory; it OOMs where MEGAHIT survives."
+    - Assemblers can run for tens of minutes without printing anything. A quiet log is not a hung job.
+  tradeoffs: >-
+    Co-assembly recovers genomes present at low abundance in any single sample,
+    but risks collapsing closely related strains into one consensus. Per-sample
+    assembly keeps strains separate but misses rare organisms.
+  see_also: [assembler, min_contig_len]
+
+03_mapping:
+  title: "Stage 03 — read mapping and contig depth"
+  summary: >-
+    Maps each sample's reads back to contigs and computes per-contig depth. The
+    depth table is what lets binners use abundance covariation, which is the
+    strongest signal they have.
+  pitfalls:
+    - Depth is computed by jgi_summarize_bam_contig_depths, which ships with metabat2 — it is needed even on routes that never bin.
+    - BAM files dominate disk use; check the plan before starting.
+  see_also: [align_tool, calc_depth]
+
+04_binning:
+  title: "Stage 04 — genome binning"
+  summary: >-
+    Groups contigs into candidate genomes using composition and abundance.
+    MetaBAT2, MaxBin2 and CONCOCT disagree in useful ways, so DAS Tool can
+    integrate them into a better non-redundant set than any single binner.
+  pitfalls:
+    - "No bins recovered almost always points upstream: contigs too fragmented, or depth too low."
+    - min_contig for binning (default 1500) is separate from the assembly filter.
+  see_also: [min_contig, binning.bins_per_sample]
+
+05_checkm:
+  title: "Stage 05 — MAG quality assessment (CheckM2)"
+  summary: >-
+    Estimates completeness and contamination for every bin, then filters on the
+    configured thresholds. This is where "bins" become "MAGs" you are willing to
+    make claims about.
+  pitfalls:
+    - The default 50%/10% filter is a broad retention criterion, not a quality claim.
+    - CheckM2 needs its DIAMOND database; the stage cannot run without it.
+  see_also: [completeness_min, contamination_max, checkm.mimag_hq_count]
+
+06_derep:
+  title: "Stage 06 — dereplication (dRep)"
+  summary: >-
+    Clusters near-identical genomes by average nucleotide identity and keeps one
+    representative per cluster, so cross-sample abundance is not split across
+    duplicate copies of the same organism.
+  pitfalls:
+    - Dereplicating too aggressively merges genuinely distinct strains.
+  see_also: [ani_threshold]
+
+07_taxonomy:
+  title: "Stage 07 — taxonomic classification"
+  summary: >-
+    Assigns taxonomy. GTDB-Tk classifies assembled genomes (MAGs) against a
+    standardised reference; Kraken2 classifies reads. These answer different
+    questions and are not interchangeable.
+  pitfalls:
+    - "Choosing kraken2 here means no MAG is classified at all — the community table then falls back to read-level composition."
+    - The GTDB release number changes classifications, so it is recorded with the results.
+  see_also: [taxonomy_tool, db.gtdbtk_missing]
+
+mag_abundance:
+  title: "MAG abundance"
+  summary: >-
+    Maps reads against the dereplicated representatives and turns per-contig
+    coverage into a MAG-by-sample abundance matrix — the input for the most
+    informative community table.
+  pitfalls:
+    - Requires dereplicated genomes; it cannot run before stage 06.
+
+08_annotation:
+  title: "Stage 08 — functional annotation of MAGs"
+  summary: >-
+    Predicts genes (Prokka, or Prodigal when Prokka is disabled) and assigns
+    function with eggNOG-mapper (COG, KEGG, GO).
+  pitfalls:
+    - Disabling Prokka still needs Prodigal, which is what feeds eggNOG.
+  see_also: [use_prokka, use_eggnog]
+
+09_contig:
+  title: "Stage 09 — contig-level analysis"
+  summary: >-
+    Predicts and annotates genes directly on contigs, without binning. Useful
+    when binning is not the goal or recovers too little: it reports gene content
+    for the whole community rather than per genome.
+  pitfalls:
+    - "contig_taxonomy defaults to none; the community table then has no source (see the validate error)."
+  see_also: [contig_taxonomy]
+
+10_community:
+  title: "Stage 10 — community summary"
+  summary: >-
+    Builds a cross-sample taxon table, picking the best available abundance
+    source and recording which one it used in SOURCE.txt. Read the source line
+    before comparing tables between runs.
+  pitfalls:
+    - Different sources are not comparable; Bracken read fractions and MAG coverage measure different things.
+  see_also: [community.taxa_count]
+
+11_delivery:
+  title: "Stage 11 — delivery package"
+  summary: >-
+    Collects analysis-ready outputs into delivery/, writes DATA_DICTIONARY.md
+    describing every file, and builds the self-contained report.html.
+
+# ── Scientific parameters ───────────────────────────────────────────────────
+quality_threshold:
+  title: "quality_threshold (fastp -q, default 15)"
+  summary: >-
+    Minimum Phred score per base. Q15 is ~97% base-call accuracy and is a
+    deliberately permissive default: assemblers tolerate some noise, and
+    over-trimming costs coverage you cannot get back.
+  tradeoffs: >-
+    Raising it to Q20+ yields cleaner reads but discards data. On low-coverage
+    samples the lost coverage usually hurts assembly more than the noise does.
+
+min_length:
+  title: "min_length (fastp -l, default 75)"
+  summary: >-
+    Reads shorter than this are dropped after trimming. Very short reads map
+    ambiguously and add little to assembly graphs.
+  tradeoffs: >-
+    Too high on heavily trimmed data can discard a large fraction of the run —
+    a common cause of low retention warnings.
+
+min_contig_len:
+  title: "min_contig_len (assembly filter, default 1000)"
+  summary: >-
+    Contigs shorter than this are discarded after assembly. Short contigs carry
+    little gene content and add noise to binning.
+  tradeoffs: >-
+    Above ~2000 you lose real but fragmented genomes; below ~500 binning quality
+    degrades. 1000 is the usual compromise.
+
+min_contig:
+  title: "min_contig (binning threshold, default 1500)"
+  summary: >-
+    Minimum contig length a binner will consider. Higher values give cleaner but
+    fewer bins; this is separate from the assembly filter.
+
+completeness_min:
+  title: "completeness_min (default 50)"
+  summary: >-
+    Minimum estimated completeness to retain a bin. MIMAG defines high quality as
+    >=90% complete with <=5% contamination, and medium quality as >=50% with
+    <10%. The default 50 therefore retains medium-quality-and-better MAGs.
+  tradeoffs: >-
+    Raising it to 90 keeps only high-quality MAGs and typically discards most
+    bins. Lowering it below 50 leaves genomes too partial to support
+    metabolic-completeness claims.
+  see_also: [contamination_max, 05_checkm]
+
+contamination_max:
+  title: "contamination_max (default 10)"
+  summary: >-
+    Maximum estimated contamination to retain a bin. Contamination signals that
+    a bin mixes more than one organism, which corrupts any per-genome inference.
+  tradeoffs: >-
+    MIMAG high quality requires <=5%. Above ~10% a bin is usually better treated
+    as a mixture than as a genome.
+
+ani_threshold:
+  title: "ani_threshold (dRep -sa, default 95)"
+  summary: >-
+    Average nucleotide identity for clustering genomes. 95% ANI is the widely
+    used operational species boundary, so the default dereplicates to roughly
+    one representative per species.
+  tradeoffs: >-
+    99% keeps strain-level diversity (and more redundancy); 95% gives a clean
+    species-level non-redundant set.
+
+assembler:
+  title: "assembler (megahit | metaspades)"
+  summary: >-
+    MEGAHIT is markedly more memory-frugal; metaSPAdes often produces better
+    contiguity on lower-complexity communities.
+  tradeoffs: >-
+    On a large metagenome with limited RAM, metaSPAdes is the usual cause of an
+    OOM kill. Check `metaglens plan` before committing.
+
+taxonomy_tool:
+  title: "taxonomy_tool (gtdbtk | kraken2)"
+  summary: >-
+    GTDB-Tk classifies MAGs; Kraken2 profiles reads. They answer different
+    questions, so this is not simply a choice of tool.
+  pitfalls:
+    - Selecting kraken2 means no MAG receives a taxonomic assignment.
+  see_also: [07_taxonomy]
+
+contig_taxonomy:
+  title: "contig_taxonomy (kraken2 | none)"
+  summary: >-
+    Whether stage 09 classifies contigs with Kraken2. Defaults to none, because
+    enabling it introduces a large database dependency.
+  pitfalls:
+    - "A contig route with 10_community selected needs this set to kraken2, otherwise the community table has no source."
+
+align_tool:
+  title: "align_tool (bowtie2 | bwa-mem2)"
+  summary: >-
+    Both are appropriate for mapping reads to contigs. bwa-mem2 is faster and
+    more memory-hungry; Bowtie2 is also used for host and PhiX depletion, so it
+    may be required even when bwa-mem2 is chosen for mapping.
+
+# ── Failure ids (as reported by diagnose) ───────────────────────────────────
+oom.killed:
+  title: "oom.killed — the process was killed for using too much memory"
+  summary: >-
+    Exit 137 is SIGKILL (128+9); on Linux this nearly always means the OOM killer
+    intervened. What matters is peak memory times concurrency, not per-job memory.
+  pitfalls:
+    - Reducing threads per job does not reduce peak memory much; reducing concurrent jobs does.
+  see_also: [02_assembly, assembler]
+
+db.gtdbtk_missing:
+  title: "db.gtdbtk_missing — GTDB-Tk reference data not configured"
+  summary: >-
+    GTDB-Tk resolves its reference through GTDBTK_DATA_PATH. Note that a copy
+    frequently already exists on a shared server without the variable being set,
+    which is why `metaglens db where gtdbtk` scans the filesystem too.
+
+disk.full:
+  title: "disk.full — the filesystem ran out of space"
+  summary: >-
+    BAMs and assembly intermediates dominate disk use. Extracting a reference
+    database transiently needs roughly twice its final size.
+  see_also: [03_mapping]
+
+glob.unmatched:
+  title: "glob.unmatched — a wildcard matched no files"
+  summary: >-
+    Usually means the upstream stage produced nothing, rather than that this
+    stage is at fault. Check the producer's outputs first.
+
+products.invalid:
+  title: "products.invalid — the stage exited 0 but produced nothing usable"
+  summary: >-
+    Caught deliberately. A header-only table is non-empty as a file yet carries
+    no result, so it must never be delivered as one — this check is what stops
+    an empty deliverable from looking like a successful run.
+
+# ── Concepts ────────────────────────────────────────────────────────────────
+mimag:
+  title: "MIMAG quality standards"
+  summary: >-
+    The community standard for reporting metagenome-assembled genomes. High
+    quality: >=90% complete, <=5% contaminated, with rRNA and tRNA genes present.
+    Medium quality: >=50% complete, <10% contaminated. Report the numbers, not
+    just the label.
+  see_also: [completeness_min, contamination_max, 05_checkm]
