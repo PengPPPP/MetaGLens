@@ -16,9 +16,10 @@ sub-directory names used by ``render._db`` so the two never disagree.
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -278,3 +279,95 @@ def required_databases(cfg) -> Dict[str, str]:
         needed["eggnog"] = f"{'/'.join(where)} functional annotation with eggNOG-mapper"
 
     return needed
+
+
+# --------------------------------------------------------------------------- #
+# Transparency + download preflight (backing `db where` / `db get`)
+# --------------------------------------------------------------------------- #
+def resolution_chain(name: str, cfg,
+                     scan_roots: Optional[List[Path]] = None) -> List[Dict[str, Any]]:
+    """Describe every resolution level in order, marking which one wins.
+
+    Path provenance is the most common source of confusion with reference
+    databases, so ``db where`` shows the whole chain rather than just a path.
+    """
+    spec = REGISTRY[name]
+    chain: List[Dict[str, Any]] = []
+    decided = False
+
+    def add(level: str, candidate: str, hit: bool, detail: str) -> None:
+        nonlocal decided
+        chain.append({"level": level, "candidate": candidate,
+                      "hit": hit and not decided, "detail": detail})
+        if hit and not decided:
+            decided = True
+
+    explicit = _configured_path(name, cfg)
+    if explicit:
+        ok, _v, detail = _check(spec, explicit)
+        add("config", str(Path(explicit).expanduser()), ok, detail)
+    else:
+        add("config", "(not set)", False, "no explicit path in the config")
+
+    env_val = os.environ.get(spec.env_var, "").strip()
+    if env_val:
+        ok, _v, detail = _check(spec, env_val)
+        add("env", f"${spec.env_var}={env_val}", ok, detail)
+    else:
+        add("env", f"${spec.env_var} (unset)", False, "environment variable not set")
+
+    scanned_hit = False
+    scan_detail = "no candidate directory matched"
+    scan_where = "filesystem scan"
+    for cand in _scan_candidates(spec, scan_roots or _default_scan_roots(cfg)):
+        ok, _v, detail = _check(spec, str(cand))
+        if ok:
+            scanned_hit, scan_detail, scan_where = True, detail, str(cand)
+            break
+    add("scan", scan_where, scanned_hit, scan_detail)
+
+    default = Path(cfg.resolved_db_dir()) / spec.default_subdir
+    ok, _v, detail = _check(spec, str(default))
+    add("default", str(default), ok, detail)
+
+    return chain
+
+
+# Databases whose own tooling can fetch them; anything else is instructions only
+# (we never fabricate download URLs).
+_SELF_FETCH: Dict[str, str] = {
+    "checkm2": "checkm2 database --download --path {dest}",
+    "eggnog": "download_eggnog_data.py -y --data_dir {dest}",
+}
+
+# Downloading writes an archive and then extracts it, so the transient peak is
+# roughly twice the final size; 1.2x is the minimum safety margin we insist on.
+_SPACE_MARGIN = 1.2
+
+
+def plan_get(name: str, dest: str, cfg) -> Dict[str, Any]:
+    """Preflight a download. Never downloads, never writes anything."""
+    spec = REGISTRY[name]
+    dest_path = Path(dest).expanduser()
+    needed_gb = spec.size_hint_gb * _SPACE_MARGIN
+
+    probe = dest_path
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        free_gb = shutil.disk_usage(str(probe)).free / (1024 ** 3)
+    except OSError:
+        free_gb = 0.0
+
+    command = _SELF_FETCH.get(name)
+    return {
+        "name": name,
+        "dest": str(dest_path),
+        "size_hint_gb": spec.size_hint_gb,
+        "required_gb": round(needed_gb, 1),
+        "free_gb": round(free_gb, 1),
+        "enough_space": free_gb >= needed_gb,
+        "command": command.format(dest=str(dest_path)) if command else None,
+        "download_hint": spec.download_hint,
+        "margin": _SPACE_MARGIN,
+    }

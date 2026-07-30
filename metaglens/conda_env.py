@@ -154,6 +154,31 @@ def list_envs() -> List[str]:
     return [name for name in (_env_name(p) for p in data.get("envs", [])) if name]
 
 
+def env_prefixes() -> Dict[str, str]:
+    """Map environment name -> prefix path, best effort (empty when unusable).
+
+    Lets callers check that a tool's executable really exists under
+    ``<prefix>/bin`` — ``conda list`` reporting a package is not the same thing
+    as the command being runnable.
+    """
+    try:
+        proc = _run_conda(["env", "list", "--json"], timeout=30)
+    except CondaUnavailable:
+        return {}
+    if proc.returncode != 0:
+        return {}
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return {}
+    out: Dict[str, str] = {}
+    for prefix in data.get("envs", []):
+        name = _env_name(prefix)
+        if name:
+            out.setdefault(name, prefix)
+    return out
+
+
 def env_exists(env: str) -> bool:
     """True when ``env`` names an existing environment or is an env prefix path."""
     if not env or env == "none":

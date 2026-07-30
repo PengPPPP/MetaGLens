@@ -1248,5 +1248,162 @@ class TestRequiredTools(TempDirCase):
             self.assertLessEqual(set(tools.required_tools(cfg)), known, route)
 
 
+class TestDoctorReport(TempDirCase):
+    """Phase 8.2: doctor report honours ruling D-2 and the three-state conda."""
+
+    def _report(self, cfg, **kw):
+        from metaglens.sense import doctor
+        return doctor.build_report(cfg, **kw)
+
+    def test_unneeded_tools_listed_but_not_problems(self):
+        cfg = self.make_cfg(route_name="contig_based", contig_taxonomy="kraken2",
+                            conda_mode="none", conda_env="none")
+        rep = self._report(cfg)
+        by_tool = {r["tool"]: r for r in rep["tools"]}
+        # Every known tool appears, including ones this route never invokes.
+        self.assertIn("gtdbtk", by_tool)
+        self.assertFalse(by_tool["gtdbtk"]["required"])
+        self.assertEqual(by_tool["gtdbtk"]["status"], "not_needed")
+        # A not-needed tool must never contribute a problem.
+        self.assertFalse(any("gtdbtk is required" in p for p in rep["problems"]))
+
+    def test_missing_required_tool_is_a_problem(self):
+        cfg = self.make_cfg(conda_mode="none", conda_env="none")
+        with unittest.mock.patch("shutil.which", return_value=None):
+            rep = self._report(cfg)
+        by_tool = {r["tool"]: r for r in rep["tools"]}
+        self.assertEqual(by_tool["fastp"]["status"], "missing")
+        self.assertFalse(rep["ok"])
+        self.assertTrue(any("fastp is required" in p for p in rep["problems"]))
+
+    def test_nonexistent_env_reported_not_crashed(self):
+        cfg = self.make_cfg(conda_env="definitely_not_an_env_xyz")
+        rep = self._report(cfg)
+        conda = rep["conda"]
+        if conda["available"]:
+            self.assertFalse(conda["env_exists"])
+            self.assertIn("not found", conda["error"])
+            self.assertFalse(rep["ok"])
+
+    def test_report_is_json_serialisable(self):
+        cfg = self.make_cfg(conda_mode="none", conda_env="none")
+        rep = self._report(cfg)
+        self.assertEqual(json.loads(json.dumps(rep))["route"], cfg.route_name)
+
+    def test_missing_required_tools_helper(self):
+        from metaglens.sense import doctor
+        cfg = self.make_cfg(conda_mode="none", conda_env="none")
+        with unittest.mock.patch("shutil.which", return_value=None):
+            rep = doctor.build_report(cfg)
+        missing = doctor.missing_required_tools(rep)
+        self.assertIn("fastp", missing)
+        # Never proposes installing something this route does not need.
+        for tool in missing:
+            self.assertTrue({r["tool"]: r for r in rep["tools"]}[tool]["required"])
+
+
+class TestDbWhereAndGet(TempDirCase):
+    """Phase 8.3: resolution chain transparency and download preflight."""
+
+    _DB_ENV = ("GTDBTK_DATA_PATH", "CHECKM2DB", "KRAKEN2_DB_PATH", "EGGNOG_DATA_DIR")
+
+    def _clear_env(self):
+        patcher = unittest.mock.patch.dict("os.environ",
+                                           {k: "" for k in self._DB_ENV}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _fake_gtdbtk(self) -> Path:
+        root = self.tmp / "gtdbtk_data" / "release232"
+        (root / "taxonomy").mkdir(parents=True)
+        (root / "taxonomy" / "gtdb_taxonomy.tsv").write_text("x\n", encoding="utf-8")
+        (root / "metadata").mkdir(parents=True)
+        (root / "metadata" / "metadata.txt").write_text(
+            "VERSION_DATA=r232\n", encoding="utf-8")
+        return root
+
+    def test_chain_reports_config_level_hit(self):
+        from metaglens.sense import database as db
+        self._clear_env()
+        root = self._fake_gtdbtk()
+        cfg = self.make_cfg(taxonomy_db=str(root))
+        chain = db.resolution_chain(name="gtdbtk", cfg=cfg, scan_roots=[self.tmp])
+        levels = [c["level"] for c in chain]
+        self.assertEqual(levels, ["config", "env", "scan", "default"])
+        hits = [c for c in chain if c["hit"]]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["level"], "config")
+
+    def test_chain_reports_scan_level_hit_when_no_config_or_env(self):
+        from metaglens.sense import database as db
+        self._clear_env()
+        self._fake_gtdbtk()
+        cfg = self.make_cfg()
+        chain = db.resolution_chain("gtdbtk", cfg, scan_roots=[self.tmp])
+        hits = [c for c in chain if c["hit"]]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["level"], "scan")
+
+    def test_chain_has_no_hit_when_absent(self):
+        from metaglens.sense import database as db
+        self._clear_env()
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        cfg = self.make_cfg()
+        chain = db.resolution_chain("eggnog", cfg, scan_roots=[empty])
+        self.assertFalse(any(c["hit"] for c in chain))
+        self.assertTrue(json.loads(json.dumps(chain)))
+
+    def test_plan_get_refuses_when_space_short(self):
+        from metaglens.sense import database as db
+        cfg = self.make_cfg()
+        Usage = __import__("collections").namedtuple("Usage", "total used free")
+        with unittest.mock.patch(
+            "metaglens.sense.database.shutil.disk_usage",
+            return_value=Usage(0, 0, 1 * 1024 ** 3),   # 1 GB free
+        ):
+            pre = db.plan_get("gtdbtk", str(self.tmp / "dest"), cfg)
+        self.assertFalse(pre["enough_space"])
+        self.assertGreater(pre["required_gb"], pre["free_gb"])
+        # 1.2x extraction margin must be applied, not the bare size.
+        self.assertAlmostEqual(pre["required_gb"],
+                               round(pre["size_hint_gb"] * 1.2, 1), places=1)
+
+    def test_plan_get_accepts_when_space_ample(self):
+        from metaglens.sense import database as db
+        cfg = self.make_cfg()
+        Usage = __import__("collections").namedtuple("Usage", "total used free")
+        with unittest.mock.patch(
+            "metaglens.sense.database.shutil.disk_usage",
+            return_value=Usage(0, 0, 900 * 1024 ** 3),
+        ):
+            pre = db.plan_get("checkm2", str(self.tmp / "dest"), cfg)
+        self.assertTrue(pre["enough_space"])
+        self.assertIn("checkm2 database --download", pre["command"])
+
+    def test_plan_get_has_no_command_for_url_only_databases(self):
+        """We never fabricate download URLs; those stay instructions only."""
+        from metaglens.sense import database as db
+        cfg = self.make_cfg()
+        pre = db.plan_get("gtdbtk", str(self.tmp / "d"), cfg)
+        self.assertIsNone(pre["command"])
+        self.assertIn("GTDB-Tk", pre["download_hint"])
+
+    def test_plan_get_writes_nothing(self):
+        from metaglens.sense import database as db
+        cfg = self.make_cfg()
+        dest = self.tmp / "untouched"
+        db.plan_get("eggnog", str(dest), cfg)
+        self.assertFalse(dest.exists())
+
+    def test_verify_is_read_only(self):
+        from metaglens.sense import database as db
+        root = self._fake_gtdbtk()
+        before = sorted(p.name for p in root.rglob("*"))
+        ok, _detail = db.validate("gtdbtk", str(root))
+        self.assertTrue(ok)
+        self.assertEqual(sorted(p.name for p in root.rglob("*")), before)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

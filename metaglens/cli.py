@@ -215,6 +215,287 @@ def configure(
         _success(f"Configuration available at {config}.")
 
 
+# ─── doctor ──────────────────────────────────────────────────────────────────
+@app.command()
+def doctor(
+    config: str = ConfigOpt,
+    env: Optional[str] = typer.Option(None, "--env", help="Conda env to inspect."),
+    fix: bool = typer.Option(False, "--fix",
+                             help="Install missing required tools (never upgrades)."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Check tools, databases, and hardware against what this route needs."""
+    import json as _json
+    from metaglens.sense import doctor as doctor_mod
+
+    cfg = _load_config(config)
+    report = doctor_mod.build_report(cfg, env=env)
+
+    if as_json:
+        console.print_json(_json.dumps(report, ensure_ascii=False))
+        raise typer.Exit(code=0 if report["ok"] else 2)
+
+    print_banner()
+    conda = report["conda"]
+    _section(f"Environment — {conda['env'] or '(none)'}")
+    if conda["executable"]:
+        console.print(f"[dim]conda: {conda['executable']}[/dim]")
+    else:
+        console.print("[yellow]conda not found; checking the current PATH only.[/yellow]")
+    if conda["error"]:
+        console.print(f"[yellow]{conda['error']}[/yellow]")
+
+    table = Table(title="Tools")
+    table.add_column("Tool", style="cyan")
+    table.add_column("Group")
+    table.add_column("Version")
+    table.add_column("Status")
+    table.add_column("Why")
+    marks = {
+        "ok": "[green]✓ ok[/green]",
+        "package_only": "[yellow]⚠ not on PATH[/yellow]",
+        "missing": "[bold red]✗ missing[/bold red]",
+        "not_needed": "[dim]· not needed[/dim]",
+    }
+    for row in report["tools"]:
+        why = row["reason"] if row["required"] else "not needed by this route"
+        table.add_row(row["tool"], row["group"], row["version"] or "—",
+                      marks.get(row["status"], row["status"]),
+                      f"[dim]{why}[/dim]" if not row["required"] else why)
+    console.print(table)
+
+    if report["databases"]:
+        db_table = Table(title="Databases (required by this route)")
+        db_table.add_column("Database", style="cyan")
+        db_table.add_column("State")
+        db_table.add_column("Version")
+        db_table.add_column("Path / hint")
+        db_marks = {"ready": "[green]✓ ready[/green]",
+                    "wrong_path": "[bold red]✗ wrong path[/bold red]",
+                    "missing": "[bold red]✗ missing[/bold red]"}
+        for name, row in report["databases"].items():
+            db_table.add_row(name, db_marks.get(row["state"], row["state"]),
+                             row["version"] or "—", row["path"] or row["detail"])
+        console.print(db_table)
+
+    hw = report["hardware"]
+    console.print(f"\n[bold]Hardware:[/bold] {hw['summary']}")
+
+    for warning in report["warnings"]:
+        console.print(f"[yellow]⚠[/yellow] {warning}")
+    for problem in report["problems"]:
+        _fail(problem)
+
+    if not report["problems"]:
+        _success("No blocking problems for this route.")
+
+    if fix:
+        missing = doctor_mod.missing_required_tools(report)
+        if not missing:
+            console.print("\n[dim]--fix: nothing to install.[/dim]")
+        else:
+            target = conda["env"]
+            if not target:
+                _fail("--fix needs a conda environment (set conda_env or use --env).")
+                raise typer.Exit(code=2)
+            console.print(
+                f"\n[bold]--fix will install into '{target}':[/bold] {', '.join(missing)}"
+            )
+            console.print("[dim]Only missing packages are installed; "
+                          "nothing already present is upgraded.[/dim]")
+            if not typer.confirm("Proceed?", default=False):
+                console.print("[dim]Aborted; nothing was changed.[/dim]")
+                raise typer.Exit(code=1)
+            from metaglens import conda_env as ce
+            exe = ce.find_conda() or "conda"
+            argv = [exe, "install", "-n", target, "-y",
+                    *conda_setup.CHANNELS, *missing]
+            console.print(f"[dim]+ {' '.join(argv)}[/dim]")
+            import subprocess
+            rc = subprocess.run(argv).returncode
+            if rc != 0:
+                _fail(f"conda install failed (exit {rc}).")
+                raise typer.Exit(code=2)
+            _success("Installed. Re-run 'metaglens doctor' to confirm.")
+
+    raise typer.Exit(code=0 if report["ok"] else 2)
+
+
+# ─── db ──────────────────────────────────────────────────────────────────────
+db_app = typer.Typer(help="Inspect and prepare reference databases.")
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("list")
+def db_list(
+    config: str = ConfigOpt,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Show the databases this route needs and whether they are ready."""
+    import json as _json
+    from metaglens.sense import database as db
+    cfg = _load_config(config)
+    out = {}
+    for name, reason in db.required_databases(cfg).items():
+        st = db.discover(name, cfg)
+        out[name] = {"reason": reason, "state": st.state, "path": st.path,
+                     "version": st.version, "source": st.source,
+                     "detail": st.detail}
+    if as_json:
+        console.print_json(_json.dumps(out, ensure_ascii=False))
+        return
+    if not out:
+        console.print("[dim]This route needs no reference databases.[/dim]")
+        return
+    table = Table(title=f"Databases — {cfg.route_name}")
+    table.add_column("Database", style="cyan")
+    table.add_column("State")
+    table.add_column("Version")
+    table.add_column("Found via")
+    table.add_column("Path / hint")
+    marks = {"ready": "[green]✓ ready[/green]",
+             "wrong_path": "[bold red]✗ wrong path[/bold red]",
+             "missing": "[bold red]✗ missing[/bold red]"}
+    for name, row in out.items():
+        table.add_row(name, marks.get(row["state"], row["state"]),
+                      row["version"] or "—", row["source"] or "—",
+                      row["path"] or row["detail"])
+    console.print(table)
+
+
+@db_app.command("status")
+def db_status(
+    config: str = ConfigOpt,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Alias for 'db list'."""
+    db_list(config=config, as_json=as_json)
+
+
+@db_app.command("where")
+def db_where(
+    name: str = typer.Argument(..., help="Database name (checkm2/gtdbtk/kraken2/eggnog)."),
+    config: str = ConfigOpt,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Print the full resolution chain and which level provides the path."""
+    import json as _json
+    from metaglens.sense import database as db
+    if name not in db.REGISTRY:
+        _fail(f"Unknown database '{name}'. Known: {', '.join(db.REGISTRY)}.")
+        raise typer.Exit(code=2)
+    cfg = _load_config(config)
+    chain = db.resolution_chain(name, cfg)
+    if as_json:
+        console.print_json(_json.dumps(
+            {"name": name, "chain": chain}, ensure_ascii=False))
+        return
+    table = Table(title=f"Resolution chain — {name}")
+    table.add_column("Order", justify="right")
+    table.add_column("Level", style="cyan")
+    table.add_column("Candidate")
+    table.add_column("Result")
+    for i, link in enumerate(chain, 1):
+        table.add_row(str(i), link["level"], link["candidate"],
+                      "[green]← used[/green]" if link["hit"]
+                      else f"[dim]{link['detail']}[/dim]")
+    console.print(table)
+
+
+@db_app.command("verify")
+def db_verify(
+    name: str = typer.Argument(..., help="Database name."),
+    path: Optional[str] = typer.Argument(None, help="Directory to verify."),
+    config: str = ConfigOpt,
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Read-only check that a directory really is this database."""
+    import json as _json
+    from metaglens.sense import database as db
+    if name not in db.REGISTRY:
+        _fail(f"Unknown database '{name}'. Known: {', '.join(db.REGISTRY)}.")
+        raise typer.Exit(code=2)
+    if path:
+        ok, detail = db.validate(name, path)
+        target = path
+    else:
+        cfg = _load_config(config)
+        st = db.discover(name, cfg)
+        ok, detail, target = st.state == "ready", st.detail, st.path
+    if as_json:
+        console.print_json(_json.dumps(
+            {"name": name, "path": target, "ok": ok, "detail": detail},
+            ensure_ascii=False))
+    elif ok:
+        _success(f"{name}: {detail} ({target})")
+    else:
+        _fail(f"{name}: {detail}")
+    raise typer.Exit(code=0 if ok else 2)
+
+
+@db_app.command("get")
+def db_get(
+    name: str = typer.Argument(..., help="Database name."),
+    dest: str = typer.Argument(..., help="Explicit destination directory (required)."),
+    config: str = ConfigOpt,
+    as_json: bool = typer.Option(False, "--json", help="Preflight only, as JSON."),
+) -> None:
+    """Preflight and (after confirmation) fetch a database into DEST."""
+    import json as _json
+    from metaglens.sense import database as db
+    if name not in db.REGISTRY:
+        _fail(f"Unknown database '{name}'. Known: {', '.join(db.REGISTRY)}.")
+        raise typer.Exit(code=2)
+    cfg = _load_config(config)
+    pre = db.plan_get(name, dest, cfg)
+
+    if as_json:
+        console.print_json(_json.dumps(pre, ensure_ascii=False))
+        raise typer.Exit(code=0 if pre["enough_space"] else 2)
+
+    _section(f"Database download preflight — {name}")
+    console.print(f"Destination : {pre['dest']}")
+    console.print(f"Size (approx): ~{pre['size_hint_gb']:.0f} GB")
+    console.print(
+        f"Space needed : ~{pre['required_gb']:.0f} GB "
+        f"(includes a {pre['margin']}x extraction margin)"
+    )
+    console.print(f"Free on that filesystem: {pre['free_gb']:.0f} GB")
+    if not pre["enough_space"]:
+        _fail("Not enough free space — choose a destination on a larger filesystem.")
+        raise typer.Exit(code=2)
+    _success("Space check passed.")
+
+    if not pre["command"]:
+        console.print(
+            f"\n[yellow]No automated fetch for '{name}'.[/yellow] Do this manually:"
+        )
+        console.print(f"  {pre['download_hint']}")
+        console.print(
+            f"\n[dim]Then: metaglens db verify {name} {pre['dest']}[/dim]")
+        return
+
+    console.print(f"\n[bold]Command:[/bold] {pre['command']}")
+    console.print("[dim]This is a large download; nothing runs without your "
+                  "confirmation.[/dim]")
+    if not typer.confirm("Download now?", default=False):
+        console.print("[dim]Aborted; nothing was downloaded.[/dim]")
+        raise typer.Exit(code=1)
+    Path(pre["dest"]).mkdir(parents=True, exist_ok=True)
+    import shlex
+    import subprocess
+    rc = subprocess.run(shlex.split(pre["command"])).returncode
+    if rc != 0:
+        _fail(f"Download failed (exit {rc}). Nothing was verified.")
+        raise typer.Exit(code=2)
+    ok, detail = db.validate(name, pre["dest"])
+    if ok:
+        _success(f"{name} ready: {detail}")
+    else:
+        _fail(f"Download finished but validation failed: {detail}")
+        raise typer.Exit(code=2)
+
+
 # ─── validate ────────────────────────────────────────────────────────────────
 @app.command()
 def validate(config: str = ConfigOpt) -> None:
