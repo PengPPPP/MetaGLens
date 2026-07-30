@@ -546,6 +546,80 @@ def db_get(
         raise typer.Exit(code=2)
 
 
+# ─── recommend ───────────────────────────────────────────────────────────────
+@app.command()
+def recommend(
+    config: str = ConfigOpt,
+    apply: bool = typer.Option(False, "--apply",
+                                help="Write the applicable changes (asks first)."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Suggest resource settings for this machine, with reasons."""
+    import json as _json
+    from metaglens.decide import advisor
+
+    cfg = _load_config(config)
+    advice = advisor.recommend(cfg)
+    changes = advisor.applicable_changes(advice)
+
+    if as_json:
+        console.print_json(_json.dumps(
+            {"advice": [a.as_dict() for a in advice],
+             "applicable_changes": changes}, ensure_ascii=False))
+        return
+
+    print_banner()
+    _section("Recommendations")
+    if not advice:
+        _success("Nothing to change — the current settings suit this machine.")
+        return
+
+    marks = {"warn": "[yellow]⚠[/yellow]", "info": "[cyan]i[/cyan]"}
+    for item in advice:
+        mark = marks.get(item.severity, "·")
+        if item.field:
+            console.print(f"\n{mark} [bold]{item.field}[/bold]: "
+                          f"{item.current} → [cyan]{item.suggested}[/cyan]"
+                          + ("" if item.applicable else " [dim](advisory)[/dim]"))
+        else:
+            console.print(f"\n{mark} [bold]{item.rule_id}[/bold] [dim](advisory)[/dim]")
+        console.print(f"   {item.reason}")
+        if item.scope == "science":
+            console.print("   [dim]Scientific parameter — MetaGLens will not "
+                          "change this for you.[/dim]")
+        if item.citation:
+            console.print(f"   [dim]{item.citation}[/dim]")
+
+    if not changes:
+        console.print("\n[dim]No automatically applicable changes "
+                      "(scientific parameters are never rewritten).[/dim]")
+        return
+
+    console.print("\n[bold]Proposed changes to " + config + ":[/bold]")
+    for line in advisor.diff_lines(cfg, changes):
+        style = "green" if line.startswith("+") else "red"
+        console.print(f"  [{style}]{line}[/{style}]")
+
+    if not apply:
+        console.print("\n[dim]Nothing was written. Re-run with "
+                      "[cyan]--apply[/cyan] to accept.[/dim]")
+        return
+
+    # The diff is always shown before the prompt: never a silent rewrite.
+    if not typer.confirm("Apply these changes?", default=False):
+        console.print("[dim]Aborted; the config is unchanged.[/dim]")
+        raise typer.Exit(code=1)
+    for field, value in changes.items():
+        setattr(cfg, field, value)
+    errors = cfg.validate()
+    if errors:
+        _fail3("The recommended changes would make the config invalid.",
+               "; ".join(errors), ["metaglens validate"])
+        raise typer.Exit(code=2)
+    cfg.to_yaml(config)
+    _success(f"Applied {len(changes)} change(s) to {config}.")
+
+
 # ─── explain ─────────────────────────────────────────────────────────────────
 @app.command()
 def explain(
@@ -944,6 +1018,9 @@ def run(
                                        help="Stop on quality-gate warnings too."),
     monitor_page: bool = typer.Option(False, "--monitor",
                                        help="Keep monitor.html updated during the run."),
+    auto_repair: int = typer.Option(0, "--auto-repair",
+                                     help="Bounded automatic retries per stage "
+                                          "(0 = off; resource changes only)."),
 ) -> None:
     """Materialize scripts and execute the pipeline."""
     print_banner()
@@ -993,9 +1070,43 @@ def run(
             from metaglens.decide import diagnose as diag_mod
             diag = diag_mod.diagnose(cfg.results_dir, step_id, exit_code=rc)
             _print_diagnosis(diag)
+
+            if auto_repair > 0:
+                from metaglens.decide import repair as repair_mod
+                while True:
+                    console.print(f"\n[cyan]Attempting a bounded repair "
+                                  f"(limit {auto_repair}).[/cyan] "
+                                  f"[dim]Resource settings only; scientific "
+                                  f"parameters are never changed.[/dim]")
+                    result = repair_mod.attempt_repair(
+                        cfg, step_id, diag, config, max_attempts=auto_repair)
+                    if result.get("plan"):
+                        console.print(f"  [dim]{result['plan']['rationale']}[/dim]")
+                    if result["repaired"]:
+                        _success(f"{step_id} completed after repair "
+                                 f"(attempt {result['attempt']}).")
+                        break
+                    console.print(f"  [yellow]Repair did not succeed:[/yellow] "
+                                  f"{result['reason']}")
+                    if not result["applied"]:
+                        break
+                    diag = diag_mod.diagnose(cfg.results_dir, step_id,
+                                             exit_code=result.get("exit_code"))
+                console.print(f"[dim]Evidence: "
+                              f"{repair_mod.repair_log_path(cfg.results_dir)}[/dim]")
+                if result["repaired"]:
+                    if monitor_page:
+                        monitor_mod.write_monitor(cfg.results_dir)
+                    _success(f"{step_id} completed.")
+                    continue
+
             console.print(f"\n[dim]Full detail: [cyan]metaglens diagnose[/cyan]"
                           + (f" · [cyan]metaglens explain {diag.rule_id}[/cyan]"
                              if diag.rule_id else "") + "[/dim]")
+            if auto_repair == 0:
+                console.print("[dim]Automatic repair is off; enable it with "
+                              "[cyan]--auto-repair 1[/cyan] (resource changes "
+                              "only).[/dim]")
             raise typer.Exit(code=2)
         _success(f"{step_id} completed.")
 
@@ -1194,14 +1305,28 @@ def report(config: str = ConfigOpt) -> None:
 
 # ─── methods ─────────────────────────────────────────────────────────────────
 @app.command()
-def methods(config: str = ConfigOpt) -> None:
-    """Print the generated Methods text."""
+def methods(
+    config: str = ConfigOpt,
+    write: bool = typer.Option(False, "--write",
+                                help="Also write reports/methods.md."),
+) -> None:
+    """Print Methods text for the stages that actually ran (real versions)."""
+    from metaglens.express import methods as methods_mod
+
     cfg = _load_config(config)
-    path = cfg.results_dir / "reports" / "methods.md"
-    if not path.is_file():
-        console.print("[yellow]methods.md not yet available (produced during the run).[/yellow]")
-        raise typer.Exit(code=1)
-    console.print(path.read_text(encoding="utf-8"))
+    if not cfg.results_dir.is_dir():
+        _fail3("No results yet.",
+               "Methods text describes what actually ran, so the pipeline has "
+               "to run first.",
+               ["metaglens run"])
+        raise typer.Exit(code=2)
+
+    text = methods_mod.generate(cfg)
+    # print(): this is prose destined for a manuscript, not styled output.
+    print(text, end="")
+    if write:
+        out = methods_mod.write(cfg)
+        _success(f"Written: {out}")
 
 
 # ─── routes ──────────────────────────────────────────────────────────────────

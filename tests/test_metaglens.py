@@ -2410,5 +2410,341 @@ class TestSharedCollectionLayer(unittest.TestCase):
         self.assertEqual(before, after, "watching must never modify run state")
 
 
+class TestAdvisor(TempDirCase):
+    """Phase 14.1/14.2: advice with reasons; science is advisory only."""
+
+    def test_rules_are_well_formed(self):
+        from metaglens.decide import advisor
+        rules = advisor.load_rules()
+        self.assertGreaterEqual(len(rules), 5)
+        for rule in rules:
+            self.assertIn("id", rule)
+            self.assertIn("when", rule)
+            self.assertTrue(rule.get("reason"), rule["id"])
+            self.assertIn(rule.get("severity"), ("info", "warn"), rule["id"])
+
+    def test_metaspades_on_small_ram_suggests_megahit(self):
+        from metaglens.decide import advisor
+        cfg = self.make_cfg(assembler="metaspades")
+        advice = advisor.recommend(cfg, cores=32, ram_gb=64, n_samples=8)
+        hit = next(a for a in advice
+                   if a.rule_id == "assembler.metaspades_needs_ram")
+        self.assertEqual(hit.suggested, "megahit")
+        self.assertTrue(hit.applicable)
+        self.assertIn("memory", hit.reason.lower())
+
+    def test_low_threads_per_job_warns(self):
+        from metaglens.decide import advisor
+        cfg = self.make_cfg(parallel_jobs=16, threads_per_job=2)
+        ids = {a.rule_id for a in advisor.recommend(cfg, cores=32, ram_gb=256,
+                                                    n_samples=16)}
+        self.assertIn("parallel.oversubscribed_threads", ids)
+
+    def test_every_advice_carries_a_reason(self):
+        from metaglens.decide import advisor
+        cfg = self.make_cfg(assembler="metaspades", parallel_jobs=16,
+                            threads_per_job=1)
+        advice = advisor.recommend(cfg, cores=16, ram_gb=32, n_samples=16)
+        self.assertTrue(advice)
+        for item in advice:
+            self.assertTrue(item.reason.strip(), item.rule_id)
+
+    def test_scientific_parameters_are_never_applicable(self):
+        """The core guarantee: --apply cannot rewrite a scientific threshold."""
+        from metaglens.decide import advisor
+        cfg = self.make_cfg(completeness_min=30, contamination_max=25,
+                            min_contig_len=200)
+        advice = advisor.recommend(cfg, cores=32, ram_gb=256, n_samples=4)
+        science = [a for a in advice if a.scope == "science"]
+        self.assertTrue(science, "expected scientific advisories")
+        for item in science:
+            self.assertFalse(item.applicable, item.rule_id)
+        changes = advisor.applicable_changes(advice)
+        for forbidden in ("completeness_min", "contamination_max",
+                          "min_contig_len"):
+            self.assertNotIn(forbidden, changes)
+
+    def test_applicable_changes_are_resource_only(self):
+        from metaglens.decide import advisor
+        cfg = self.make_cfg(assembler="metaspades", parallel_jobs=16,
+                            threads_per_job=1, completeness_min=10)
+        changes = advisor.applicable_changes(
+            advisor.recommend(cfg, cores=16, ram_gb=32, n_samples=16))
+        self.assertTrue(set(changes) <= advisor.APPLICABLE_FIELDS)
+
+    def test_expression_evaluator_rejects_code(self):
+        """Rules are user-editable YAML, so expressions must not execute code."""
+        from metaglens.decide.advisor import _resolve
+        ctx = {"cores": 32, "ram_gb": 64.0}
+        self.assertEqual(_resolve("max(1, cores // 4)", ctx), 8)
+        for hostile in ('__import__("os").system("true")',
+                        'open("/etc/passwd").read()',
+                        "cores.__class__.__mro__"):
+            # Refused: returned unchanged, never executed.
+            self.assertEqual(_resolve(hostile, ctx), hostile)
+
+    def test_diff_lines_show_before_and_after(self):
+        from metaglens.decide import advisor
+        cfg = self.make_cfg(assembler="metaspades")
+        lines = advisor.diff_lines(cfg, {"assembler": "megahit"})
+        self.assertIn("- assembler: metaspades", lines)
+        self.assertIn("+ assembler: megahit", lines)
+
+
+class TestMethodsGeneration(TempDirCase):
+    """Phase 14.3: only what ran, with versions that are actually recorded."""
+
+    def _results(self, completed, versions="") -> Path:
+        r = self.tmp / "mres"
+        (r / "reports").mkdir(parents=True, exist_ok=True)
+        (r / "pipeline_status.json").write_text(json.dumps({
+            "selected_steps": list(completed),
+            "steps": {s: {"status": "completed"} for s in completed}}),
+            encoding="utf-8")
+        if versions:
+            (r / "reports" / "tool_versions.txt").write_text(versions,
+                                                             encoding="utf-8")
+        return r
+
+    def test_only_completed_stages_appear(self):
+        from metaglens.express import methods
+        cfg = self.make_cfg()
+        r = self._results(["01_qc", "02_assembly"])
+        text = methods.generate(cfg, results_dir=r)
+        self.assertIn("Quality control", text)
+        self.assertIn("assembl", text.lower())
+        # Stages that did not run must not be described at all.
+        self.assertNotIn("CheckM2", text)
+        self.assertNotIn("dRep", text)
+        self.assertNotIn("GTDB-Tk", text)
+
+    def test_real_versions_are_used(self):
+        from metaglens.express import methods
+        cfg = self.make_cfg()
+        r = self._results(["01_qc"], versions="fastp: fastp 0.23.4 [reused]\n")
+        text = methods.generate(cfg, results_dir=r)
+        self.assertIn("v0.23.4", text)
+        self.assertNotIn("provisional", text)
+
+    def test_missing_version_marked_provisional_not_invented(self):
+        from metaglens.express import methods
+        cfg = self.make_cfg()
+        r = self._results(["01_qc"])          # no tool_versions.txt at all
+        text = methods.generate(cfg, results_dir=r)
+        self.assertIn("provisional", text)
+
+    def test_command_echo_is_not_passed_off_as_a_version(self):
+        from metaglens.express import methods
+        cfg = self.make_cfg()
+        r = self._results(["01_qc"], versions="fastp: [stub] fastp --version\n")
+        text = methods.generate(cfg, results_dir=r)
+        self.assertNotIn("--version)", text)
+        self.assertIn("provisional", text)
+
+    def test_optional_branches_reflect_switches(self):
+        from metaglens.express import methods
+        r = self._results(["01_qc", "08_annotation"])
+        with_prokka = methods.generate(self.make_cfg(use_prokka=True,
+                                                     use_eggnog=False),
+                                       results_dir=r)
+        self.assertIn("Prokka", with_prokka)
+        self.assertNotIn("eggNOG", with_prokka)
+        without = methods.generate(self.make_cfg(use_prokka=False,
+                                                 use_eggnog=True),
+                                   results_dir=r)
+        self.assertIn("Prodigal", without)
+        self.assertIn("eggNOG", without)
+
+    def test_host_removal_only_mentioned_when_enabled(self):
+        from metaglens.express import methods
+        r = self._results(["01_qc"])
+        self.assertNotIn("Host-derived",
+                         methods.generate(self.make_cfg(), results_dir=r))
+        self.assertIn("Host-derived",
+                      methods.generate(self.make_cfg(remove_host=True,
+                                                     host_genome="/x/host.fa"),
+                                       results_dir=r))
+
+    def test_no_completed_stage_says_so(self):
+        from metaglens.express import methods
+        text = methods.generate(self.make_cfg(), results_dir=self._results([]))
+        self.assertIn("No stage has completed", text)
+
+    def test_write_creates_methods_md(self):
+        from metaglens.express import methods
+        cfg = self.make_cfg()
+        r = self._results(["01_qc"])
+        out = methods.write(cfg, results_dir=r)
+        self.assertTrue(out.is_file())
+        self.assertEqual(out.name, "methods.md")
+
+
+class TestBoundedRepair(TempDirCase):
+    """Phase 14.4: the safety boundary, asserted from the outside."""
+
+    def _diag(self, rule_id="oom.killed", exit_code=137, actions=None):
+        from metaglens.decide.diagnose import Diagnosis
+        return Diagnosis(
+            stage="02_assembly", rule_id=rule_id, failure_class="environment",
+            title="killed", diagnosis="d",
+            actions=actions if actions is not None else [
+                {"kind": "auto", "op": "reduce_parallel", "factor": 0.5,
+                 "safe": True, "text": "halve concurrency"}],
+            exit_code=exit_code, matched=True)
+
+    # ---- counter-examples: the whitelist must refuse ---------------------- #
+    def test_refuses_to_change_scientific_parameters(self):
+        """Mandated counter-example: science params must be rejected."""
+        from metaglens.decide import repair
+        for field_name, value in (("completeness_min", 10),
+                                  ("contamination_max", 50),
+                                  ("ani_threshold", "80"),
+                                  ("min_contig_len", 100),
+                                  ("kmer_list", "21"),
+                                  ("assembler", "megahit")):
+            plan = repair.RepairPlan(op="reduce_parallel", stage="02_assembly",
+                                     changes={field_name: value})
+            with self.assertRaises(repair.RepairRefused, msg=field_name) as ctx:
+                repair.check_allowed(plan)
+            self.assertIn(field_name, str(ctx.exception))
+
+    def test_refuses_unknown_operation(self):
+        from metaglens.decide import repair
+        plan = repair.RepairPlan(op="delete_outputs", stage="02_assembly",
+                                 changes={})
+        with self.assertRaises(repair.RepairRefused):
+            repair.check_allowed(plan)
+
+    def test_refuses_inputs_and_databases(self):
+        from metaglens.decide import repair
+        for field_name in ("raw_data_dir", "db_dir", "conda_env",
+                           "sample_manifest", "route_name"):
+            plan = repair.RepairPlan(op="retry", stage="01_qc",
+                                     changes={field_name: "/tmp/x"})
+            with self.assertRaises(repair.RepairRefused, msg=field_name):
+                repair.check_allowed(plan)
+
+    def test_allows_only_resource_fields(self):
+        from metaglens.decide import repair
+        repair.check_allowed(repair.RepairPlan(
+            op="reduce_parallel", stage="02_assembly",
+            changes={"parallel_jobs": 2, "threads_per_job": 8}))
+        repair.check_allowed(repair.RepairPlan(
+            op="increase_memory", stage="02_assembly",
+            changes={"memory": "128G"}))
+        repair.check_allowed(repair.RepairPlan(op="retry", stage="01_qc"))
+
+    def test_plan_from_oom_diagnosis_lowers_concurrency(self):
+        from metaglens.decide import repair
+        cfg = self.make_cfg(parallel_jobs=8, threads_per_job=4,
+                            total_threads=32)
+        plan = repair.plan_from_diagnosis(cfg, self._diag())
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.changes["parallel_jobs"], 4)
+        self.assertLess(plan.changes["parallel_jobs"], 8)
+        repair.check_allowed(plan)          # must be inside the boundary
+
+    def test_no_plan_when_diagnosis_offers_nothing_safe(self):
+        from metaglens.decide import repair
+        cfg = self.make_cfg()
+        diag = self._diag(rule_id="db.gtdbtk_missing", exit_code=1, actions=[
+            {"kind": "human", "text": "download the database"}])
+        self.assertIsNone(repair.plan_from_diagnosis(cfg, diag))
+
+    def test_no_plan_when_already_single_job(self):
+        from metaglens.decide import repair
+        cfg = self.make_cfg(parallel_jobs=1, threads_per_job=8)
+        self.assertIsNone(repair.plan_from_diagnosis(cfg, self._diag()))
+
+    # ---- bounds and evidence --------------------------------------------- #
+    def _prepare(self):
+        cfg = self.make_cfg(parallel_jobs=8, threads_per_job=4,
+                            total_threads=32)
+        results = cfg.results_dir
+        (results / "reports").mkdir(parents=True, exist_ok=True)
+        (results / "pipeline_status.json").write_text(json.dumps({
+            "steps": {"02_assembly": {"status": "failed", "attempts": 1}}}),
+            encoding="utf-8")
+        script = results / routes.STEPS["02_assembly"].script
+        script.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+        return cfg, results
+
+    def test_disabled_when_limit_zero(self):
+        from metaglens.decide import repair
+        cfg, results = self._prepare()
+        out = repair.attempt_repair(cfg, "02_assembly", self._diag(),
+                                    str(self.tmp / "c.yaml"), max_attempts=0)
+        self.assertFalse(out["applied"])
+        self.assertIn("disabled", out["reason"])
+
+    def test_repeated_signature_stops(self):
+        from metaglens.decide import repair
+        cfg, results = self._prepare()
+        repair.append_log(results, {"stage": "02_assembly",
+                                    "signature": "oom.killed:137",
+                                    "outcome": "still_failing"})
+        out = repair.attempt_repair(cfg, "02_assembly", self._diag(),
+                                    str(self.tmp / "c.yaml"), max_attempts=2)
+        self.assertFalse(out["applied"])
+        self.assertIn("same failure signature", out["reason"])
+
+    def test_limit_is_enforced(self):
+        from metaglens.decide import repair
+        cfg, results = self._prepare()
+        for i in range(2):
+            repair.append_log(results, {"stage": "02_assembly",
+                                        "signature": f"other:{i}"})
+        out = repair.attempt_repair(cfg, "02_assembly", self._diag(),
+                                    str(self.tmp / "c.yaml"), max_attempts=2)
+        self.assertFalse(out["applied"])
+        self.assertIn("limit reached", out["reason"])
+
+    def test_successful_repair_records_full_evidence(self):
+        from metaglens.decide import repair
+        cfg, results = self._prepare()
+        cfg_path = str(self.tmp / "cfg.yaml")
+
+        def fake_run():
+            pipeline.write_step_status(cfg, "02_assembly", "completed")
+            return 0
+
+        out = repair.attempt_repair(cfg, "02_assembly", self._diag(), cfg_path,
+                                    max_attempts=2, runner=fake_run)
+        self.assertTrue(out["applied"])
+        self.assertTrue(out["repaired"])
+        # Only the failed stage was re-run, with lowered concurrency.
+        self.assertEqual(cfg.parallel_jobs, 4)
+        entries = repair.read_log(results)
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        for key in ("timestamp", "stage", "attempt", "signature", "diagnosis",
+                    "plan", "rerun_command", "outcome"):
+            self.assertIn(key, entry, key)
+        self.assertEqual(entry["outcome"], "repaired")
+        # The failing script was preserved before anything changed.
+        self.assertTrue(entry["snapshot"])
+        self.assertTrue(Path(entry["snapshot"]).is_file())
+
+    def test_failed_repair_is_recorded_too(self):
+        from metaglens.decide import repair
+        cfg, results = self._prepare()
+        out = repair.attempt_repair(cfg, "02_assembly", self._diag(),
+                                    str(self.tmp / "c2.yaml"), max_attempts=2,
+                                    runner=lambda: 1)
+        self.assertTrue(out["applied"])
+        self.assertFalse(out["repaired"])
+        self.assertEqual(repair.read_log(results)[0]["outcome"], "still_failing")
+
+    def test_refusal_is_logged_as_evidence(self):
+        from metaglens.decide import repair
+        cfg, results = self._prepare()
+        bad = self._diag(actions=[{"kind": "auto", "op": "rewrite_science",
+                                   "text": "nope"}])
+        out = repair.attempt_repair(cfg, "02_assembly", bad,
+                                    str(self.tmp / "c3.yaml"), max_attempts=2)
+        self.assertFalse(out["applied"])
+        self.assertIn("no safe automatic repair", out["reason"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
