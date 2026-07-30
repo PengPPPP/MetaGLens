@@ -31,6 +31,15 @@ from metaglens.report import generate_report, _parse_fastp_reports
 
 _PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
 
+# Rich is a CLI-only dependency; the suite must stay runnable on a bare
+# interpreter (CI installs PyYAML only), so rich-dependent cases are skipped
+# rather than failing the run.
+try:  # pragma: no cover - availability probe
+    import rich  # noqa: F401
+    _HAS_RICH = True
+except ImportError:  # pragma: no cover
+    _HAS_RICH = False
+
 
 def _make_reads(raw: Path, ids, r1_tpl="{id}_R1.fastq.gz", r2_tpl="{id}_R2.fastq.gz"):
     raw.mkdir(parents=True, exist_ok=True)
@@ -2374,6 +2383,7 @@ class TestSharedCollectionLayer(unittest.TestCase):
         self.assertIn("Stages:", html)
         self.assertIn("unit(s)", html)
 
+    @unittest.skipUnless(_HAS_RICH, "rich is not installed")
     def test_dashboard_renders_from_same_snapshot(self):
         from metaglens.observe import monitor
         from metaglens.express import dashboard
@@ -2386,6 +2396,7 @@ class TestSharedCollectionLayer(unittest.TestCase):
         for step in ("01_qc", "02_assembly", "03_mapping"):
             self.assertIn(step, out)
 
+    @unittest.skipUnless(_HAS_RICH, "rich is not installed")
     def test_dashboard_states_that_leaving_is_safe(self):
         """The q/Ctrl-C semantics must be visible, never ambiguous."""
         from metaglens.observe import monitor
@@ -2398,6 +2409,7 @@ class TestSharedCollectionLayer(unittest.TestCase):
         out = console.file.getvalue().replace("\n", " ")
         self.assertIn("keeps running", out)
 
+    @unittest.skipUnless(_HAS_RICH, "rich is not installed")
     def test_watch_once_does_not_touch_the_run(self):
         from metaglens.express import dashboard
         from rich.console import Console
