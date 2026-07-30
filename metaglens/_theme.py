@@ -24,7 +24,7 @@ code,.mono,input,select,button,table{font-family:"Times New Roman",Times,serif;}
 #lensBL{bottom:-240px;left:-210px;width:760px;opacity:.06;transform:rotate(-14deg);}
 header,.meta,nav,main,footer{position:relative;z-index:1;}
 header{padding:22px 34px 8px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;}
-.logo{height:88px;width:auto;display:block;}
+.logo{height:132px;width:auto;display:block;}
 .headline{margin-left:auto;text-align:right;}
 .headline .t{font-size:22px;font-weight:700;}
 .headline .d{font-size:15px;color:var(--muted);}
@@ -56,7 +56,7 @@ tbody tr:hover{background:rgba(59,125,224,.05);} td.num,th.num{text-align:right;
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink-soft);cursor:pointer;font-size:14px;transition:all .15s;} .btn:hover{border-color:var(--blue);color:var(--blue);}
 .tl-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);} .tl-step{min-width:140px;font-weight:700;} .tl-bar{flex:1;height:8px;border-radius:4px;background:var(--line);position:relative;} .tl-fill{height:100%;border-radius:4px;} .tl-meta{min-width:180px;font-size:14px;color:var(--muted);text-align:right;}
 footer{color:var(--muted);font-size:14px;padding:24px 34px 32px;text-align:center;}
-@media(max-width:700px){header{padding:16px;} .meta{padding:6px 16px;} main{padding:18px 16px;} nav{padding:0 10px;} nav button{padding:10px 12px;font-size:15px;} .stat .v{font-size:24px;}}
+@media(max-width:700px){header{padding:16px;} .logo{height:96px;} .meta{padding:6px 16px;} main{padding:18px 16px;} nav{padding:0 10px;} nav button{padding:10px 12px;font-size:15px;} .stat .v{font-size:24px;}}
 """
 
 # The two hexagonal-aperture lens SVGs used as fixed background decoration.
