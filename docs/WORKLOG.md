@@ -566,3 +566,46 @@ pass validation: community_matrix.tsv has 0 data row(s), expected >= 1
 至今**所有验证都基于桩工具与合成数据**。真实工具的参数细节、版本差异、
 数据规模效应只有真跑才会暴露。故下一步安排真实环境验证(见 `IMPL-PLAN-webconfig.md`
 的 Phase 16),而非继续堆功能。
+
+---
+
+## 9. Phase 16 真实环境验证结果(2026-07-31)
+
+实现方用真实 Illumina 2×150 reads(`~/FD/data/clean_reads/` 的 FWJ101/FWJ102,
+每样本抽样 30k 条,临时目录已删)完成了 16.A/16.B/16.C 的**跑前检查**部分。
+
+### 9.1 跑前检查在真实数据上全部准确
+
+- `doctor`:裸 PATH 下正确报告 16 项工具缺失;
+- `plan`:正确算出 gtdbtk `ready r232`(经 config 路径解析)、checkm2/eggnog `missing`
+  并给出 `db get` 命令;
+- `db list`:`~/gtdbtk_data/release232` 解析为 ready,版本 r232 读自 `metadata`
+  (非猜目录名)——**真实数据上路径解析链工作正常**。
+
+### 9.2 设计假设不成立的发现(待用户裁决,未擅自改设计)
+
+**fastp、seqkit、megahit 分属三个不同 conda 环境,没有任何单一环境能跑完哪怕一个阶段组。**
+而软件的 conda 模型是 `reuse=单环境` / `create=3 组环境`——**都不匹配这台机器
+"一工具一环境"的布局**。实测工具分布:
+
+```
+fastp   → fastq_megahit
+seqkit  → step_10_env
+megahit → metawrap_env
+(其余 binning/checkm2/drep/gtdbtk 各在独立环境)
+```
+
+01→02→03 的真实跑因此**未执行**(用户在此步喊停)。这不是 bug,是**设计对目标环境
+的假设偏差**——目标服务器(共享、工具零散)恰恰是这种布局。候选方向(待裁决):
+① 支持"每工具/每阶段指定环境"的细粒度模型;② `doctor` 增加"跨环境拼 PATH"建议;
+③ 文档明确说明 reuse 单环境模式的适用前提。
+
+### 9.3 IDE 会话预览配置页时发现的两个 UI/逻辑问题
+
+- **logo 过小**:配置页 logo `height:88px`,用户要求放大(约 1.5 倍)。
+- **并行建议硬编码 n=1**:`webconfig.py` 的 `refreshPlan()` 里 `var n=1`,
+  取到的 `samples-box` 元素从未使用 → 网页并行建议**永远按 1 个样本算**
+  (3 样本项目会建议 1×112 而非 3×37)。单元测试覆盖不到(只测后端 `/api/plan`),
+  属"只有真点一遍才会发现"的前端缺陷。
+
+以上两项 + Phase 16 文档化,已派实现方处理(见 IMPL-PLAN Phase 17)。
