@@ -221,28 +221,28 @@ POST 回写 `metaglens.yaml`。
 **这个任务的难点不是"递归",而是样本 ID 从哪来 + 不能跨目录错配。**
 以下约束是硬性的,写错会造成"样本张冠李戴"这类最坏的科学错误:
 
-- [ ] 7.1 **递归扫描**:替换 `_list_fastqs` 为带**深度上限**(默认 3 层)的递归;
+- [x] 7.1 **递归扫描**:替换 `_list_fastqs` 为带**深度上限**(默认 3 层)的递归;
   必须**防符号链接环**(用 `resolve()` 记已访问 inode/路径);跳过隐藏目录。
-- [ ] 7.2 **配对只能在同一父目录内进行**。绝对不允许把 A 目录的 R1 和 B 目录的 R2
+- [x] 7.2 **配对只能在同一父目录内进行**。绝对不允许把 A 目录的 R1 和 B 目录的 R2
   配成一对——这是递归实现最容易引入的致命 bug。实现上:先按父目录分组,再在每组内
   套用现有 4 种命名约定。
-- [ ] 7.3 **样本 ID 推导顺序**(并把用了哪种记录下来):
+- [x] 7.3 **样本 ID 推导顺序**(并把用了哪种记录下来):
   1. 文件名推导(与现有扁平逻辑完全一致);
   2. 若文件名推导出的 ID **在不同目录间冲突**(如布局2 全是 `reads`)→ 改用**父目录名**;
   3. 若父目录名仍冲突 → **报错并要求用户提供 manifest**,不得自行编号糊过去。
   **回归要求**:扁平布局的发现结果与 ID 必须与现在**逐字不变**(现有测试须全绿)。
-- [ ] 7.4 **布局透明化**:`discover()` 的返回值除现有 `pattern` 外,增加
+- [x] 7.4 **布局透明化**:`discover()` 的返回值除现有 `pattern` 外,增加
   `layout`(`flat` / `nested`)与 `id_source`(`filename` / `dirname`),供向导与网页
   展示"我是怎么判断的"——符合设计原则 4(解释权高于自动化)。
-- [ ] 7.5 **用户可自己填/改**(用户明确要的第二条路):
+- [x] 7.5 **用户可自己填/改**(用户明确要的第二条路):
   - 网页配置(Phase 4)的样本表改为**可编辑**:可改 `sample_id`、可勾选排除;
   - 终端向导补「排除部分样本」选项(设计稿 §5.1 已规划但未做);
   - `samples.tsv` manifest 仍是终极兜底,文档写明。
   改完仍须过 `_validate()`(ID 唯一、文件存在、无文件被两个样本共用)。
-- [ ] 7.6 测试:两种嵌套布局各一例;跨目录错配的**反例断言**(A/B 目录不得互相配对);
+- [x] 7.6 测试:两种嵌套布局各一例;跨目录错配的**反例断言**(A/B 目录不得互相配对);
   ID 冲突时回退到目录名;目录名也冲突时报错;符号链接环不死循环;深度超限被截断;
   **扁平布局回归不变**。
-- [ ] 7.7 commit `feat(samples): recursive discovery for nested layouts with safe id derivation`。
+- [x] 7.7 commit `feat(samples): recursive discovery for nested layouts with safe id derivation`。
 
 **验证**:上述两种布局都能正确发现 2 个样本,ID 分别为 `SampleA/SampleB` 与 `S1/S2`。
 
@@ -346,3 +346,34 @@ OK
   与向导产出一致、语言无关、headless 端口转发）与「Live monitor」（file:// 自刷新、崩溃后仍可看、旁路）两节。
 - 计划文档全部勾选框完成，各 Phase 完成备注齐全。
 - 5.3 待办：通知 IDE 会话审查 git diff（由汇报环节完成）。
+
+
+### Phase 7 — 嵌套目录的样本发现（commit `195934f`）
+
+- 7.1 `_list_fastqs` → `_walk_fastqs(raw_dir, max_depth=3)`：迭代式 DFS，跳过隐藏目录，
+  按 `resolve()` 记已访问目录去重 → 符号链接指回祖先不会死循环。
+- 7.2 **按父目录分组后组内配对**（`_pair_in_group`）。跨目录配对在结构上不可能发生；
+  组内 id 冲突则否决该命名约定（与原扁平语义一致），继续试下一个。
+- 7.3 ID 推导：文件名全局唯一 → `filename`；否则父目录名唯一 → `dirname`；
+  两者都冲突 → 报错并要求 manifest（不自行编号）。
+- 7.4 `discover()` 返回 `Discovery(samples, pattern, layout, id_source)` NamedTuple。
+- 7.5 向导新增「Exclude some samples」（写出校验过的 samples.tsv）；网页样本表可改 ID/勾选排除，
+  `/save` 携带 `samples` 时写出 samples.tsv 并置 `sample_manifest`，全部过 `_validate()`；
+  README 新增「Sample discovery」节说明约定/嵌套/ID 来源/manifest 兜底。
+- 7.6 新增 9 项测试：布局1、布局2、**跨目录错配反例**、ID 与目录名双冲突报错、
+  符号链接环、深度超限截断、扁平回归（ids/pattern/路径逐项断言）、网页改名写 manifest、重复 ID 被拒。
+
+**实测输出（计划验证项，全部符合）**：
+```
+布局1: ['SampleA','SampleB'] | pattern: _R1/_R2 | layout: nested | id_source: filename
+布局2: ['S1','S2']           | pattern: _1/_2   | layout: nested | id_source: dirname
+        S1 -> S1/reads_1.fq.gz + reads_2.fq.gz     （配对严格在各自目录内）
+        S2 -> S2/reads_1.fq.gz + reads_2.fq.gz
+扁平:   ['S1','S2']          | layout: flat   | id_source: filename
+```
+
+- 门禁：`unittest` 95→**104** 全绿；`bash -n` 全 14 模板 OK；`py_compile` 全模块 OK。
+
+**一处需确认的适配（非行为变更）**：7.4 要求 `discover()` 返回值增加两个字段，
+故三处既有测试的 2 元解包改为 `discover(...)[:2]`（`tests/test_metaglens.py:181,188,211`），
+断言值一字未改；`pipeline.resolve_samples` 用 `[0]` 不受影响。
