@@ -138,7 +138,12 @@ class Config:
         known = {f.name for f in dataclasses.fields(cls)}
         unknown = set(data) - known
         if unknown:
-            raise ValueError(f"Unknown config keys: {', '.join(sorted(unknown))}")
+            from .express.suggest import suggest
+            parts = []
+            for key in sorted(unknown):
+                hint = suggest(key, known)
+                parts.append(f"'{key}'" + (f" ({hint})" if hint else ""))
+            raise ValueError("Unknown config keys: " + ", ".join(parts))
         return cls(**data)
 
     # ------------------------------------------------------------------ #
@@ -156,16 +161,24 @@ class Config:
         elif not Path(self.raw_data_dir).is_dir():
             errors.append(f"raw_data_dir does not exist: {self.raw_data_dir}")
         if self.route_name not in routes.ROUTE_NAMES:
+            from .express.suggest import suggest
+            hint = suggest(self.route_name, routes.ROUTE_NAMES)
             errors.append(
-                f"route_name must be one of {routes.ROUTE_NAMES}, got '{self.route_name}'."
+                f"route_name must be one of {routes.ROUTE_NAMES}, "
+                f"got '{self.route_name}'." + (f" {hint}" if hint else "")
             )
         if self.route_name == "custom":
             if not self.custom_steps:
                 errors.append("route_name is 'custom' but custom_steps is empty.")
             unknown_steps = [s for s in self.custom_steps if s not in routes.STEPS]
             if unknown_steps:
+                from .express.suggest import suggest
+                hints = []
+                for step in unknown_steps:
+                    tip = suggest(step, routes.STEPS)
+                    hints.append(f"'{step}'" + (f" — {tip}" if tip else ""))
                 errors.append(
-                    f"custom_steps contains unknown step id(s): {', '.join(unknown_steps)}. "
+                    f"custom_steps contains unknown step id(s): {'; '.join(hints)}. "
                     f"Valid steps: {', '.join(routes.STEPS)}."
                 )
         if self.exec_env not in ("local", "slurm", "sge"):

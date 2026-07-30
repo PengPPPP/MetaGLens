@@ -96,8 +96,14 @@ def resolve_route(route_name: str, custom_steps: Optional[List[str]] = None) -> 
         basis, binning = _infer_basis(steps)
         return Route("custom", basis, binning, steps)
     if route_name not in ROUTES:
+        # difflib directly, not express.suggest: routes is a low-level module
+        # that express depends on, so importing it here would cycle.
+        import difflib
+        close = difflib.get_close_matches(route_name or "", ROUTE_NAMES, n=1)
+        hint = f" Did you mean '{close[0]}'?" if close else ""
         raise ValueError(
-            f"Unknown route '{route_name}'. Choose one of: {', '.join(ROUTE_NAMES)}"
+            f"Unknown route '{route_name}'.{hint} "
+            f"Choose one of: {', '.join(ROUTE_NAMES)}"
         )
     return ROUTES[route_name]
 

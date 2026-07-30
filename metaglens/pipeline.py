@@ -167,19 +167,27 @@ def select_steps(cfg: Config, only: Optional[List[str]] = None,
     of silently producing an empty run.
     """
     steps = cfg.route.steps
+    from .express.suggest import suggest
+
     if only:
         unknown = [s for s in only if s not in steps]
         if unknown:
+            hints = []
+            for name in unknown:
+                hint = suggest(name, steps)
+                hints.append(f"'{name}'" + (f" — {hint}" if hint else ""))
             raise PipelineError(
-                f"Step(s) not in route '{cfg.route.name}': {', '.join(unknown)}. "
+                f"Step(s) not in route '{cfg.route.name}': {'; '.join(hints)}. "
                 f"Route steps: {', '.join(steps)}."
             )
         return [s for s in steps if s in set(only)]
     if from_step:
         if from_step not in steps:
+            hint = suggest(from_step, steps)
             raise PipelineError(
-                f"Step '{from_step}' not in route '{cfg.route.name}'. "
-                f"Route steps: {', '.join(steps)}."
+                f"Step '{from_step}' not in route '{cfg.route.name}'."
+                + (f" {hint}" if hint else "")
+                + f" Route steps: {', '.join(steps)}."
             )
         return steps[steps.index(from_step):]
     return list(steps)
