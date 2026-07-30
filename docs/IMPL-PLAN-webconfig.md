@@ -537,6 +537,48 @@ diagnose 归因准确率验证过再上,否则会自动地做错事」。
 
 ---
 
+## Phase 17 — 配置页修复 + Phase 16 文档化
+
+### 17.A logo 放大(用户明确要求)
+
+- [ ] 17.A1 `_theme.py` 的 `.logo{height:88px}` 改为 **`height:132px`**(约 1.5 倍)。
+  这是共享主题,报告/配置/监控三页会一起变大——**这是期望的**(视觉统一)。
+  确认 header 的 `align-items:center` 与 `flex-wrap` 在放大后仍正常、不挤压标题。
+- [ ] 17.A2 若移动端 `@media(max-width:700px)` 下 132px 过大,可加一条
+  `.logo{height:96px}` 的媒体查询;否则保持。
+
+### 17.B 并行建议硬编码 n=1(IDE 会话发现的前端缺陷)
+
+`webconfig.py` 的 `refreshPlan()`:
+```javascript
+var n=1; var sb=document.getElementById("samples-box");   // sb 取了却从未使用
+fetch(api("/api/plan?cores="+hw.cores+"&ram="+hw.ram_gb+"&n="+n))
+```
+后果:网页并行建议**永远按 1 个样本算**(3 样本 → 1×112,应为 3×37)。
+
+- [ ] 17.B1 让 `refreshSamples()` 把发现的样本数存到一个模块级变量(如 `window.__nSamples`
+  或闭包变量),`refreshPlan()` 用它代替 `n=1`;无样本时回退 1。
+- [ ] 17.B2 **补一条能抓住这类前端缺陷的测试**:对 `build_page()` 产出的 JS 做静态断言——
+  至少断言 `/api/plan` 的 URL 里 `n=` 参数**不是硬编码的 `n=1`**,而是引用样本数变量。
+  (这类前端逻辑单测难覆盖,用"生成的 JS 不含某坏模式"的断言兜底。)
+- [ ] 17.B3 顺带自查 webconfig.py 里**还有没有其它"取了变量却没用"或硬编码**的地方。
+
+### 17.C Phase 16 发现文档化
+
+- [ ] 17.C1 把 Phase 16 的工具实测表(工具→环境→版本)、跑前检查结论、
+  以及**多环境分散问题**(fastp/seqkit/megahit 分属三个环境,无单一环境能跑完一组)
+  整理进完成备注。**这是"设计假设不成立"级,只记录 + 给候选方案,不改设计、不改代码。**
+- [ ] 17.C2 候选方向写入备注供用户裁决:① 每工具/每阶段指定环境的细粒度模型;
+  ② `doctor` 增加"跨环境拼 PATH"建议;③ 文档说明 reuse 单环境模式的适用前提。
+
+### 17.D 门禁与提交
+
+- [ ] 17.D1 全绿:`unittest`(裸解释器)+ `bash -n` + `demo` 两路由;`compileall` 干净。
+- [ ] 17.D2 commits 分开:`style(theme): enlarge logo`、`fix(webconfig): plan uses real sample count`、
+  `docs: phase 16 real-env findings`。
+
+---
+
 ## 已定决策
 
 - **Phase 6 选型 = 方案 S**(自刷新静态页,无服务)——用户 2026-07-30 确认。
