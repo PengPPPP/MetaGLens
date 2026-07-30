@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# No network, no conda: the whole suite plus the stub demo must pass on a bare
+# Python. Anything that needs a real bioinformatics toolchain is out of scope.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install PyYAML only
+        # The test suite and the demo deliberately avoid typer/rich so they run
+        # on a bare interpreter; PyYAML is the single runtime dependency they use.
+        run: python -m pip install --quiet "PyYAML>=5.1"
+
+      - name: Byte-compile every module
+        run: python -m compileall -q metaglens tests
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Syntax-check every stage template
+        run: |
+          status=0
+          for f in metaglens/templates/*.sh; do
+            if ! bash -n "$f"; then
+              echo "bash -n failed: $f"
+              status=1
+            fi
+          done
+          exit $status
+
+      - name: Offline end-to-end self-check (stub toolchain)
+        run: python -m metaglens.demo
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel
+        run: |
+          python -m pip install --quiet build
+          python -m build --wheel
+
+      - name: Verify every subpackage and template ships
+        # Regression guard: subpackages were once missing from the wheel because
+        # only the top-level package was listed.
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = set(zipfile.ZipFile(wheel).namelist())
+          required = [
+              "metaglens/cli.py",
+              "metaglens/sense/tools.py",
+              "metaglens/decide/plan.py",
+              "metaglens/express/webconfig.py",
+              "metaglens/observe/monitor.py",
+              "metaglens/demo/runner.py",
+              "metaglens/templates/00_setup.sh",
+              "metaglens/templates/report_logo.b64",
+          ]
+          missing = [r for r in required if r not in names]
+          if missing:
+              print("missing from wheel:", missing)
+              sys.exit(1)
+          print("wheel contents OK:", wheel)
+          PY
