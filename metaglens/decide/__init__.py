@@ -10,5 +10,9 @@ from __future__ import annotations
 
 from .planner import Plan, recommend_parallel
 from .plan import build_plan, render_plain
+from .gates import GateResult, evaluate, load_rules, summarise
 
-__all__ = ["Plan", "recommend_parallel", "build_plan", "render_plain"]
+__all__ = [
+    "Plan", "recommend_parallel", "build_plan", "render_plain",
+    "GateResult", "evaluate", "load_rules", "summarise",
+]

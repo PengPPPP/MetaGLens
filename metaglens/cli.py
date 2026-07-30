@@ -496,6 +496,88 @@ def db_get(
         raise typer.Exit(code=2)
 
 
+# ─── gate ────────────────────────────────────────────────────────────────────
+@app.command()
+def gate(
+    config: str = ConfigOpt,
+    stage: Optional[str] = typer.Option(None, "--stage",
+                                        help="Comma-separated stage ids (default: all)."),
+    strict: bool = typer.Option(False, "--strict",
+                                help="Treat warnings as blocking."),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output."),
+) -> None:
+    """Check scientific quality metrics (QC retention, bins, MIMAG MAGs...)."""
+    import json as _json
+    from metaglens.decide import gates as gates_mod
+
+    cfg = _load_config(config)
+    results = cfg.results_dir
+    if not results.is_dir():
+        _fail("Results directory not found. Run the pipeline first.")
+        raise typer.Exit(code=2)
+
+    stages = [s.strip() for s in stage.split(",") if s.strip()] if stage else None
+    gate_results = gates_mod.evaluate(results, stages=stages)
+    summary = gates_mod.summarise(gate_results, strict=strict)
+
+    # Persist so the report and later inspection see the same verdict.
+    status_path = results / "pipeline_status.json"
+    if status_path.is_file():
+        try:
+            with open(status_path, "r", encoding="utf-8") as handle:
+                data = _json.load(handle)
+            data["gates"] = summary
+            with open(status_path, "w", encoding="utf-8") as handle:
+                _json.dump(data, handle, indent=2, ensure_ascii=False)
+        except (OSError, ValueError):
+            pass
+
+    if as_json:
+        console.print_json(_json.dumps(summary, ensure_ascii=False))
+        raise typer.Exit(code=0 if summary["ok"] else 2)
+
+    print_banner()
+    _section(f"Quality gates — {cfg.project_name}"
+             + (" (strict)" if strict else ""))
+    if not gate_results:
+        console.print("[dim]No gate rules apply to the selected stage(s).[/dim]")
+        raise typer.Exit(code=0)
+
+    marks = {"pass": "[green]✓ pass[/green]",
+             "warn": "[yellow]⚠ warn[/yellow]",
+             "block": "[bold red]✗ block[/bold red]",
+             "unknown": "[dim]· n/a[/dim]"}
+    table = Table(title="Gates")
+    table.add_column("Gate", style="cyan")
+    table.add_column("Stage")
+    table.add_column("Value")
+    table.add_column("Status")
+    for res in gate_results:
+        table.add_row(res.gate_id, res.stage, res.detail,
+                      marks.get(res.status, res.status))
+    console.print(table)
+
+    for res in gate_results:
+        if res.status in ("warn", "block") and res.hint:
+            console.print(f"\n[bold]{res.gate_id}[/bold] — {res.detail}")
+            console.print(f"  [dim]{res.hint}[/dim]")
+
+    counts = summary["counts"]
+    console.print(
+        f"\n{counts['pass']} passed · {counts['warn']} warning(s) · "
+        f"{counts['block']} blocking · {counts['unknown']} not applicable"
+    )
+    if summary["ok"]:
+        if counts["warn"] and not strict:
+            console.print("[yellow]Warnings present but not blocking.[/yellow] "
+                          "[dim]Use --strict to treat them as errors.[/dim]")
+        else:
+            _success("All applicable gates passed.")
+    else:
+        _fail(f"Blocking gates: {', '.join(summary['blocking'])}")
+    raise typer.Exit(code=0 if summary["ok"] else 2)
+
+
 # ─── demo ────────────────────────────────────────────────────────────────────
 @app.command()
 def demo(
@@ -683,6 +765,8 @@ def run(
     only: Optional[str] = typer.Option(None, help="Comma-separated steps to run."),
     from_step: Optional[str] = typer.Option(None, "--from",
                                              help="Resume from this step."),
+    strict_gates: bool = typer.Option(False, "--strict-gates",
+                                       help="Stop on quality-gate warnings too."),
 ) -> None:
     """Materialize scripts and execute the pipeline."""
     print_banner()
@@ -707,6 +791,8 @@ def run(
         _fail(str(exc))
         raise typer.Exit(code=2)
 
+    from metaglens.decide import gates as gates_mod
+
     for step_id in step_list:
         if pipeline.step_status(cfg, step_id) == "completed":
             console.print(f"  [dim]{step_id} — already completed, skipping.[/dim]")
@@ -721,6 +807,25 @@ def run(
             _fail(f"{step_id} failed (exit {rc}). Check reports/logs/.")
             raise typer.Exit(code=2)
         _success(f"{step_id} completed.")
+
+        # Scientific gates for the stage that just finished.
+        stage_gates = gates_mod.evaluate(cfg.results_dir, stages=[step_id])
+        summary = gates_mod.summarise(stage_gates, strict=strict_gates)
+        for res in stage_gates:
+            if res.status == "warn":
+                console.print(f"    [yellow]⚠[/yellow] {res.detail}")
+                if res.hint:
+                    console.print(f"      [dim]{res.hint}[/dim]")
+            elif res.status == "block":
+                _fail(f"    {res.detail}")
+                if res.hint:
+                    console.print(f"      [dim]{res.hint}[/dim]")
+        if not summary["ok"]:
+            _fail(f"{step_id}: quality gate(s) blocked the run "
+                  f"({', '.join(summary['blocking'])}).")
+            console.print("[dim]Inspect with [cyan]metaglens gate[/cyan]; "
+                          "gates are configured in decide/rules/gates.yaml.[/dim]")
+            raise typer.Exit(code=2)
 
     console.print("\n[bold green]Pipeline finished.[/bold green]")
 

@@ -1778,5 +1778,117 @@ class TestProductValidation(TempDirCase):
         self.assertEqual(pipeline.step_status(cfg, "10_community"), "completed")
 
 
+class TestQualityGates(TempDirCase):
+    """Phase 10.3/10.4: soft scientific gates from externalised rules."""
+
+    def _results(self, retention=(1000, 900), bins=2, checkm=None,
+                 taxa=1) -> Path:
+        r = self.tmp / "gres"
+        (r / "01_qc").mkdir(parents=True, exist_ok=True)
+        (r / "samples.tsv").write_text(
+            "sample_id\tr1\tr2\nA\t/x/1\t/x/2\n", encoding="utf-8")
+        before, after = retention
+        (r / "01_qc" / "A.qcstats").write_text(f"{before}\t{after}\n",
+                                               encoding="utf-8")
+        allbins = r / "04_binning" / "all_bins"
+        allbins.mkdir(parents=True, exist_ok=True)
+        for i in range(bins):
+            (allbins / f"bin{i}.fa").write_text(">c\nACGT\n", encoding="utf-8")
+        if checkm is not None:
+            (r / "05_checkm").mkdir(parents=True, exist_ok=True)
+            rows = ["Name\tCompleteness\tContamination\tModel"]
+            for i, (comp, cont) in enumerate(checkm):
+                rows.append(f"bin{i}\t{comp}\t{cont}\tstub")
+            (r / "05_checkm" / "quality_report.tsv").write_text(
+                "\n".join(rows) + "\n", encoding="utf-8")
+        comm = r / "10_community"
+        comm.mkdir(parents=True, exist_ok=True)
+        lines = ["taxon\tA"] + [f"s__T{i}\t{i+1}" for i in range(taxa)]
+        (comm / "community_matrix.tsv").write_text("\n".join(lines) + "\n",
+                                                   encoding="utf-8")
+        return r
+
+    def _by_id(self, results):
+        from metaglens.decide import gates
+        return {g.gate_id: g for g in gates.evaluate(results)}
+
+    def test_rules_load_from_yaml(self):
+        from metaglens.decide import gates
+        rules = gates.load_rules()
+        self.assertIn("01_qc", rules)
+        # Every rule must be traceable and explain itself.
+        for stage, entries in rules.items():
+            for rule in entries:
+                self.assertIn("id", rule, stage)
+                self.assertIn("metric", rule, stage)
+                self.assertTrue(rule.get("hint"), rule.get("id"))
+
+    def test_retention_pass_warn_block(self):
+        good = self._by_id(self._results(retention=(1000, 900)))
+        self.assertEqual(good["qc.retention_rate"].status, "pass")
+        warn = self._by_id(self._results(retention=(1000, 600)))
+        self.assertEqual(warn["qc.retention_rate"].status, "warn")
+        block = self._by_id(self._results(retention=(1000, 300)))
+        self.assertEqual(block["qc.retention_rate"].status, "block")
+
+    def test_no_bins_warns(self):
+        res = self._by_id(self._results(bins=0))
+        self.assertEqual(res["binning.bins_per_sample"].status, "warn")
+        self.assertIn("fragmented", res["binning.bins_per_sample"].hint)
+
+    def test_mimag_high_quality_counting(self):
+        # 95/2 is HQ; 60/12 is not.
+        hq = self._by_id(self._results(checkm=[(95.0, 2.0)]))
+        self.assertEqual(hq["checkm.mimag_hq_count"].status, "pass")
+        lq = self._by_id(self._results(checkm=[(60.0, 12.0)]))
+        self.assertEqual(lq["checkm.mimag_hq_count"].status, "warn")
+        self.assertEqual(lq["checkm.mimag_hq_count"].value, 0.0)
+
+    def test_absent_stage_is_unknown_not_failure(self):
+        from metaglens.decide import gates
+        bare = self.tmp / "bare"
+        bare.mkdir()
+        results = gates.evaluate(bare)
+        self.assertTrue(results)
+        self.assertTrue(all(g.status == "unknown" for g in results))
+        summary = gates.summarise(results)
+        self.assertTrue(summary["ok"], "unknown metrics must not block")
+
+    def test_strict_promotes_warning_to_blocking(self):
+        from metaglens.decide import gates
+        results = gates.evaluate(self._results(bins=0))
+        lenient = gates.summarise(results, strict=False)
+        strict = gates.summarise(results, strict=True)
+        self.assertTrue(lenient["ok"])
+        self.assertFalse(strict["ok"])
+        self.assertIn("binning.bins_per_sample", strict["blocking"])
+
+    def test_block_stops_even_without_strict(self):
+        from metaglens.decide import gates
+        results = gates.evaluate(self._results(retention=(1000, 100)))
+        self.assertFalse(gates.summarise(results, strict=False)["ok"])
+
+    def test_summary_is_json_serialisable(self):
+        from metaglens.decide import gates
+        summary = gates.summarise(gates.evaluate(self._results()))
+        self.assertEqual(json.loads(json.dumps(summary))["worst"], "pass")
+
+    def test_gates_appear_in_report(self):
+        from metaglens.decide import gates
+        r = self._results(retention=(1000, 600))   # a warning to render
+        summary = gates.summarise(gates.evaluate(r))
+        (r / "pipeline_status.json").write_text(json.dumps({
+            "project_name": "demo", "route_name": "mag_per_sample",
+            "selected_steps": [], "steps": {}, "gates": summary}),
+            encoding="utf-8")
+        out = generate_report(r, raw_data_dir="/x")
+        html = out.read_text(encoding="utf-8")
+        self.assertIn("tab-gates", html)
+        self.assertIn("Quality Gates", html)
+        payload = json.loads(re.search(r"window\.__MG__=(\{.*?\});", html,
+                                       re.S).group(1))
+        self.assertTrue(payload["gates"]["gates"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

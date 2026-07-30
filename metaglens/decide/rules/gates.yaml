@@ -1,0 +1,77 @@
+# Scientific quality gates — soft thresholds on stage metrics.
+#
+# Separate from product validation (metaglens/state.py), which asks "did this
+# stage produce anything usable at all". Gates ask the next question: "do the
+# numbers look plausible". A gate never blocks by default: warn only informs,
+# and only `--strict-gates` turns a warning into a stop. `block_below` /
+# `block_above` are reserved for values that make the result meaningless.
+#
+# Every rule carries an id (so results are traceable) and a hint written in
+# plain language explaining the usual causes — a newcomer needs to know what to
+# do about it, not just that a number is low.
+
+01_qc:
+  - id: qc.retention_rate
+    metric: retention_rate
+    label: Read retention after QC
+    unit: "%"
+    warn_below: 70
+    block_below: 40
+    hint: >-
+      Low retention usually means adapter contamination, or that min_length /
+      quality_threshold are stricter than the data can support. Inspect a fastp
+      HTML report in 01_qc/ before assuming the data are bad.
+
+04_binning:
+  - id: binning.bins_per_sample
+    metric: bins_per_sample
+    label: Bins recovered per sample
+    unit: bins
+    warn_below: 1
+    hint: >-
+      No bins recovered. The usual causes are contigs that are too fragmented
+      (check the N50 from 02_assembly) or sequencing depth too low for binning.
+      Co-assembly (mag_co_binning) sometimes recovers bins that per-sample
+      assembly cannot.
+
+05_checkm:
+  - id: checkm.mimag_hq_count
+    metric: mimag_hq_count
+    label: High-quality MAGs (MIMAG)
+    unit: MAGs
+    warn_below: 1
+    hint: >-
+      No MAG reaches the MIMAG high-quality bar (>=90% completeness and <=5%
+      contamination). The run is still usable — medium-quality MAGs are
+      legitimate — but deeper sequencing or co-assembly is what usually raises
+      this number.
+  - id: checkm.retained_fraction
+    metric: retained_fraction
+    label: Bins passing the completeness/contamination filter
+    unit: "%"
+    warn_below: 20
+    hint: >-
+      Most bins were discarded by the completeness_min / contamination_max
+      filter. That often points to fragmented assemblies or mixed bins rather
+      than to thresholds being wrong; lowering the thresholds would retain more
+      but lower-quality genomes.
+
+06_derep:
+  - id: derep.representative_count
+    metric: representative_count
+    label: Representative genomes after dereplication
+    unit: MAGs
+    warn_below: 1
+    hint: >-
+      Dereplication produced no representative genome. Check that 05_checkm
+      retained at least one bin.
+
+10_community:
+  - id: community.taxa_count
+    metric: taxa_count
+    label: Taxa in the community table
+    unit: taxa
+    warn_below: 1
+    hint: >-
+      The community table has no taxa. Check the abundance source recorded in
+      10_community/SOURCE.txt and the taxonomy stage that feeds it.

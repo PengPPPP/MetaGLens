@@ -202,6 +202,7 @@ def generate_report(results_dir: Path, logo_b64: str = "",
         "dict": dictrows,
         "qc": qc_stats,
         "timeline": timeline,
+        "gates": status.get("gates", {}),
     }
 
     html = _build_html(data, project)
@@ -285,6 +286,7 @@ _BODY = r"""
 <main>
   <section id="tab-overview"><h2>Overview</h2><p class="hint">Summary of the delivered analysis package.</p><div class="source-note">Community abundance source: <b id="comm-source2"></b></div><div class="flex" id="stats"></div></section>
   <section id="tab-pipeline"><h2>Pipeline</h2><p class="hint">Stage execution timeline and status.</p><div class="card" id="tl-card"></div></section>
+  <section id="tab-gates"><h2>Quality Gates</h2><p class="hint">Scientific metric checks (thresholds configured in decide/rules/gates.yaml).</p><div class="card" id="gates-card"></div></section>
   <section id="tab-qc"><h2>QC Statistics</h2><p class="hint">Per-sample read quality control summary (fastp).</p><div class="card"><div class="heat-wrap"><table id="qc-table"></table></div></div><div style="margin-top:8px"><button class="btn" onclick="exportCSV('qc-table','qc_stats.csv')">Export CSV</button></div></section>
   <section id="tab-community"><h2>Community</h2><p class="hint">Cross-sample taxonomic relative abundance.</p><div class="source-note">Source: <b id="comm-source"></b></div><div class="controls"><label class="ctl">Top:<select id="topn"><option value="10">10</option><option value="15" selected>15</option><option value="999">All</option></select></label><label class="ctl">View:<select id="commview"><option value="stack">Chart</option><option value="table">Table</option></select></label><button class="btn" onclick="exportCSV('comm-table','community.csv')">Export CSV</button></div><div class="card" id="comm-chart-card"><div class="heat-wrap"><div id="comm-chart"></div></div><div class="legend" id="comm-legend"></div></div><div class="card" id="comm-table-card" style="display:none"><div class="heat-wrap"><table id="comm-table"></table></div></div></section>
   <section id="tab-mag"><h2>MAG Abundance</h2><p class="hint">Representative genome x sample relative abundance (%).</p><div class="controls"><label class="ctl">Sort:<select id="magsort"><option value="abund">Abundance</option><option value="name">Name</option></select></label></div><div class="card heat-wrap"><div id="mag-heat"></div></div></section>
@@ -310,7 +312,7 @@ $("#m-nsamp").textContent=RUN.samples.length;$("#m-gen").textContent=RUN.generat
 $("#comm-source").textContent=RUN.communitySource||"(none)";$("#comm-source2").textContent=RUN.communitySource||"(none)";
 
 // Tabs
-var TABS=[["overview","Overview"],["pipeline","Pipeline"],["qc","QC"],["community","Community"],["mag","MAG Abundance"],["quality","MAG Quality"],["files","Files"]];
+var TABS=[["overview","Overview"],["pipeline","Pipeline"],["gates","Gates"],["qc","QC"],["community","Community"],["mag","MAG Abundance"],["quality","MAG Quality"],["files","Files"]];
 var nav=$("#nav");TABS.forEach(function(t,i){var b=el("button",{},t[1]);if(i===0)b.classList.add("active");b.onclick=function(){document.querySelectorAll("nav button").forEach(function(x){x.classList.remove("active");});document.querySelectorAll("section").forEach(function(x){x.classList.remove("active");});b.classList.add("active");$("#tab-"+t[0]).classList.add("active");};nav.appendChild(b);});
 $("#tab-overview").classList.add("active");
 
@@ -322,6 +324,21 @@ stats.forEach(function(s){var d=el("div",{"class":"stat"});d.appendChild(el("div
 (function(){var card=$("#tl-card");if(!TL.length){card.innerHTML='<div class="empty">No pipeline data.</div>';return;}
 var colors={"completed":"var(--good)","running":"var(--warn)","failed":"var(--bad)","pending":"var(--line)"};
 TL.forEach(function(t){var row=el("div",{"class":"tl-row"});row.innerHTML='<div class="tl-step">'+t.step+'</div><div class="tl-bar"><div class="tl-fill" style="width:'+(t.status==="completed"?"100%":t.status==="running"?"50%":"0%")+';background:'+colors[t.status]+'"></div></div><div class="tl-meta">'+(t.started||"—")+' → '+(t.finished||"—")+' (×'+t.attempts+')</div>';card.appendChild(row);});})();
+
+// Quality gates
+(function(){var card=$("#gates-card");var G=(MG.gates&&MG.gates.gates)||[];
+if(!G.length){card.innerHTML='<div class="empty">No gate results recorded. Run <b>metaglens gate</b>.</div>';return;}
+var colors={"pass":"var(--good)","warn":"var(--warn)","block":"var(--bad)","unknown":"var(--muted)"};
+var labels={"pass":"pass","warn":"warning","block":"blocking","unknown":"n/a"};
+var c=(MG.gates&&MG.gates.counts)||{};
+var h='<div class="hint">'+(c.pass||0)+" passed \u00b7 "+(c.warn||0)+" warning(s) \u00b7 "+(c.block||0)+" blocking \u00b7 "+(c.unknown||0)+' n/a</div>';
+h+='<table><thead><tr><th>Gate</th><th>Stage</th><th>Value</th><th>Status</th></tr></thead><tbody>';
+G.forEach(function(g){h+="<tr><td class='mono'>"+g.id+"</td><td>"+g.stage+"</td><td>"+g.detail+
+  "</td><td style='color:"+(colors[g.status]||"var(--muted)")+";font-weight:700'>"+(labels[g.status]||g.status)+"</td></tr>";});
+h+="</tbody></table>";
+G.forEach(function(g){if((g.status==="warn"||g.status==="block")&&g.hint){
+  h+='<div class="source-note" style="margin-top:12px"><b>'+g.id+'</b> — '+g.hint+'</div>';}});
+card.innerHTML=h;})();
 
 // QC table
 (function(){var t=$("#qc-table");if(!QC.length){t.innerHTML="<tbody><tr><td class='empty'>No QC data available (fastp reports not found).</td></tr></tbody>";return;}
