@@ -463,3 +463,106 @@ df40665 feat(observe): live self-refreshing monitor.html            (Phase 6)
 - 设计稿 §8 的 P0 仍有 **`metaglens demo`**(迷你数据集端到端自检)与 **CI** 未做。
 - P1 尚未做完的部分:`doctor` / `db` / `plan` 三个命令本身(底座 `sense/` 已具备)、
   `advisor.py` 规则引擎、`gates` / `diagnose` / `repair`(P2/P4)。
+
+---
+
+## 8. Phase 10–15 审查(2026-07-31,用户休息期间连续执行)
+
+实现方连续完成 **Phase 10→15**(设计稿 P2/P3/P4 全部剩余部分),15 个功能提交,
+新建 10 个模块。IDE 会话独立复核并**做了攻击式验证**。
+
+### 8.1 提交链
+
+```
+36d5947 feat(state): semantic product validation                 (Phase 10)
+acc8d40 feat(decide): quality gates, gate command & --strict-gates
+5ccff44 feat(decide): failure diagnosis rules & three-part errors (Phase 11)
+ef147a0 feat(express): did-you-mean suggestions                   (Phase 12)
+85e0f47 feat(express): user-level profile
+54d0f0b feat(express): interactive language selection (en/zh)
+8ceb702 feat(express): explain — offline knowledge base
+93032d2 feat(observe): resource sampling & progress parsers        (Phase 13)
+efb3cc3 feat(express): live terminal dashboard
+d4788a8 feat(cli): watch command & run --monitor
+7027197 feat(decide): parameter advisor with externalised rules    (Phase 14)
+47733cd feat(express): generate Methods from what actually ran
+4119713 feat(decide): bounded self-repair with a non-negotiable boundary
+4ba9d2d feat(cli): recommend, methods & run --auto-repair
+3446359 docs: README for the new commands
+dc770c1 test: skip rich-dependent dashboard cases (IDE 会话修)
+```
+
+新模块:`state.py`、`decide/{gates,diagnose,repair,advisor}.py`、
+`observe/{resources,progress/}`、`express/{dashboard,explain,i18n,methods}.py`。
+规则全部外置:`decide/rules/{gates,failures,advice}.yaml`、`express/knowledge/topics.yaml`。
+
+### 8.2 发现并修掉的问题:测试在裸解释器下失败
+
+实现方声明"门禁全绿",**实际有 3 个 ERROR**。根因:`test_dashboard_*` 与
+`test_watch_once_*` 三例**无条件 `import rich`**,而本机与 CI 都不装 rich
+(项目只依赖 PyYAML 跑测试)。这违反了既定约束——测试须在裸解释器可跑。
+
+修法:加 `@unittest.skipUnless(_HAS_RICH, ...)`,**保留全部断言不删**
+(其中"watch 必须永不修改运行状态"这条尤其值得留)。修后:**248 通过 / 3 跳过**。
+commit `dc770c1`。
+
+**教训**:自证门禁时,"我这里跑过了"不等于"在目标环境跑得过"。
+
+### 8.3 攻击式验证(不看代码看行为)
+
+**① `repair` 安全边界 —— 7 种攻击全部被拒**
+
+| 攻击 | 结果 |
+|---|---|
+| `min_contig_len` / `completeness_min` / `contamination_max` / `ani_threshold` / `assembler` | 均 `RepairRefused` ✅ |
+| 非白名单操作 `delete_outputs` | `RepairRefused` ✅ |
+| **夹带**:合法 `parallel_jobs` + 非法 `min_length` 同时提交 | `RepairRefused` ✅(最阴险一条也挡住) |
+| 合法的降并发 / 加内存 | 正常放行 ✅ |
+
+白名单:4 个操作(`reduce_parallel`/`reduce_threads`/`increase_memory`/`retry`)、
+3 个可改字段(`parallel_jobs`/`threads_per_job`/`memory`)、37 个禁止字段。
+**科学参数在结构上动不了**——符合原则 5 与设计稿 §4.6 的不可协商边界。
+
+**② `diagnose` 归因 —— 6 类命中且不编造**
+
+```
+exit 137  → oom.killed / environment      + 自动降并发建议
+GTDB 缺库 → db.gtdbtk_missing             + "metaglens db where gtdbtk"
+命令没找到 → tool.not_found                + "metaglens doctor"
+磁盘满    → disk.full                     + "metaglens plan"
+通配符空  → glob.unmatched / script_defect + "metaglens gate"
+完全未知  → class=unknown「no known signature matched」+ 指向日志
+```
+每条建议都是可直接执行的命令(三段式落地)。**未知时如实报 unknown,不硬编造原因。**
+
+**③ 产物验证 —— §7-8 的"表头非空"陷阱已堵死**
+
+```
+只有表头    → ok=False ✅   ← 正是当初漏过去的情形
+有 1 数据行 → ok=True  ✅
+文件不存在  → ok=False ✅
+完全空文件  → ok=False ✅
+```
+且在跑测试时观察到它**真实生效**:
+```
+[metaglens] 10_community: the script reported success but its products did not
+pass validation: community_matrix.tsv has 0 data row(s), expected >= 1
+(a header line alone is not a result)
+```
+即**shell 说成功也会被 Python 侧翻掉**——设计稿 §4.4 点名的「当前最实质的可靠性缺口」补上了。
+
+### 8.4 门禁复核
+
+`unittest` **248 通过 / 3 跳过**;`bash -n` 全 14 模板 OK;`compileall` 干净;
+`python3 -m metaglens.demo` 两路由 PASS;工作区干净。
+
+### 8.5 当前进度
+
+设计稿 **P0–P4 全部实现完毕**,外加用户后续提出的全部新特性:
+网页配置(方案 B)、中英切换、实时监控页(方案 S)、嵌套目录样本发现。
+
+### 8.6 下一步:**从"加功能"转向"质量收口"**
+
+至今**所有验证都基于桩工具与合成数据**。真实工具的参数细节、版本差异、
+数据规模效应只有真跑才会暴露。故下一步安排真实环境验证(见 `IMPL-PLAN-webconfig.md`
+的 Phase 16),而非继续堆功能。
