@@ -75,12 +75,43 @@ def coerce_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 def save_config(payload: Dict[str, Any], out_path: str) -> Tuple[bool, List[str], str]:
     """Build a Config from ``payload``, validate, and write YAML if valid.
 
-    Returns ``(ok, errors, out_path)``. On failure nothing is written.
+    An optional ``samples`` key (the possibly renamed / filtered rows from the
+    web table) is written as a validated ``samples.tsv`` beside the config and
+    referenced via ``sample_manifest``. Returns ``(ok, errors, out_path)``; on
+    failure nothing is written.
     """
-    cfg = Config(**coerce_payload(payload))
+    fields = coerce_payload(payload)
+    rows = payload.get("samples")
+
+    manifest_path = ""
+    manifest_rows = []
+    if rows:
+        from .. import samples as samples_mod
+        try:
+            manifest_rows = [
+                samples_mod.Sample(str(r["sample_id"]).strip(),
+                                   str(r["r1"]), str(r["r2"]))
+                for r in rows
+            ]
+        except (KeyError, TypeError) as exc:
+            return False, [f"invalid samples table: {exc}"], out_path
+        if not manifest_rows:
+            return False, ["the samples table is empty"], out_path
+        try:
+            samples_mod._validate(manifest_rows)
+        except samples_mod.SampleDiscoveryError as exc:
+            return False, [str(exc)], out_path
+        manifest_path = str(Path(out_path).expanduser().resolve().parent / "samples.tsv")
+        fields["sample_manifest"] = manifest_path
+
+    cfg = Config(**fields)
     errors = cfg.validate()
     if errors:
         return False, errors, out_path
+
+    if manifest_rows:
+        from .. import samples as samples_mod
+        samples_mod.write_manifest(manifest_rows, manifest_path)
     cfg.to_yaml(out_path)
     return True, [], out_path
 
@@ -114,14 +145,22 @@ def api_plan(cores: int, ram_gb: float, n_samples: int) -> Dict[str, Any]:
 def api_samples(directory: str) -> Dict[str, Any]:
     from .. import samples as samples_mod
     try:
-        found, pattern = samples_mod.discover(directory)
+        found, pattern, layout, id_source = samples_mod.discover(directory)
     except Exception as exc:  # discovery raises a typed error; surface as message
-        return {"ok": False, "error": str(exc), "samples": [], "pattern": ""}
+        return {"ok": False, "error": str(exc), "samples": [],
+                "pattern": "", "layout": "", "id_source": ""}
     return {
         "ok": True,
         "pattern": pattern,
+        "layout": layout,
+        "id_source": id_source,
         "samples": [
-            {"sample_id": s.sample_id, "r1": Path(s.r1).name, "r2": Path(s.r2).name}
+            {"sample_id": s.sample_id,
+             "dir": Path(s.r1).parent.name,
+             "r1": s.r1,
+             "r2": s.r2,
+             "r1_name": Path(s.r1).name,
+             "r2_name": Path(s.r2).name}
             for s in found
         ],
     }
@@ -361,12 +400,16 @@ var I18N={
    route_name:"分析路线",total_threads:"总线程数",taxonomy_tool:"MAG 分类工具",
    contig_taxonomy:"Contig 分类",use_eggnog:"eggNOG 功能注释",
    samples:"发现的样本",plan:"并行建议",dbs:"所需数据库",
+   include:"使用",sample_id:"样本 ID",directory:"目录",
+   edithint:"可直接修改样本 ID，或取消勾选以排除；保存时会写出 samples.tsv。",
    saved:"配置已保存到",nexthint:"下一步:metaglens run"},
  en:{title:"MetaGLens Configuration",subtitle:"Local web config · loopback only",save:"Save config",
    project_name:"Project name",work_dir:"Work directory",raw_data_dir:"Raw-data directory",
    route_name:"Analysis route",total_threads:"Total threads",taxonomy_tool:"MAG taxonomy tool",
    contig_taxonomy:"Contig taxonomy",use_eggnog:"eggNOG annotation",
    samples:"Discovered samples",plan:"Parallel recommendation",dbs:"Required databases",
+   include:"Use",sample_id:"Sample ID",directory:"Directory",
+   edithint:"Edit a sample ID directly, or untick to exclude; a samples.tsv is written on save.",
    saved:"Configuration saved to",nexthint:"Next: metaglens run"}
 };
 var LANG=BOOT.lang||"zh";
@@ -397,10 +440,22 @@ function render(){
   refreshSamples();refreshPlan();refreshDbs();
 }
 function val(id){var e=document.getElementById(id);if(!e)return null;return e.type==="checkbox"?e.checked:e.value;}
+var SAMPLES=[];
 function refreshSamples(){var d=val("raw_data_dir");if(!d)return;fetch(api("/api/samples?dir="+encodeURIComponent(d))).then(function(r){return r.json();}).then(function(j){
-  var box=document.getElementById("samples-box")||el("div",{id:"samples-box","class":"reason"});box.id="samples-box";
-  box.textContent=t("samples")+": "+(j.ok?(j.samples.length+" ("+j.pattern+")"):(j.error||""));
-  document.getElementById("form").appendChild(box);});}
+  var box=document.getElementById("samples-box")||el("div",{id:"samples-box","class":"card"});box.id="samples-box";
+  if(!j.ok){SAMPLES=[];box.innerHTML='<div class="empty">'+t("samples")+": "+(j.error||"")+'</div>';
+    document.getElementById("form").appendChild(box);return;}
+  SAMPLES=j.samples;
+  var h='<div class="hint">'+t("samples")+": "+j.samples.length
+       +" · "+j.pattern+" · layout: "+j.layout+" · ids from: "+j.id_source+'</div>';
+  h+='<div class="heat-wrap"><table><thead><tr><th>'+t("include")+'</th><th>'+t("sample_id")
+   +'</th><th>'+t("directory")+'</th><th>R1</th><th>R2</th></tr></thead><tbody>';
+  j.samples.forEach(function(s,i){
+    h+='<tr><td><input type="checkbox" class="s-inc" data-i="'+i+'" checked/></td>'
+     +'<td><input type="text" class="s-id" data-i="'+i+'" value="'+s.sample_id+'"/></td>'
+     +'<td>'+(s.dir||"")+'</td><td class="mono">'+s.r1_name+'</td><td class="mono">'+s.r2_name+'</td></tr>';});
+  h+='</tbody></table></div><div class="hint">'+t("edithint")+'</div>';
+  box.innerHTML=h;document.getElementById("form").appendChild(box);});}
 function refreshPlan(){fetch(api("/api/hardware")).then(function(r){return r.json();}).then(function(hw){
   var n=1;var sb=document.getElementById("samples-box");
   fetch(api("/api/plan?cores="+hw.cores+"&ram="+hw.ram_gb+"&n="+n)).then(function(r){return r.json();}).then(function(p){
@@ -413,9 +468,16 @@ function refreshDbs(){var q="taxonomy_tool="+val("taxonomy_tool")+"&contig_taxon
     var lines=[];for(var k in j.required){var d=j.required[k];lines.push(k+": "+d.state+(d.version?(" "+d.version):"")+" — "+d.detail);}
     box.innerHTML=t("dbs")+":<br>"+(lines.join("<br>")||"—");
     document.getElementById("form").appendChild(box);});}
-function collect(){return {project_name:val("project_name"),raw_data_dir:val("raw_data_dir"),
+function collect(){var o={project_name:val("project_name"),raw_data_dir:val("raw_data_dir"),
   work_dir:val("work_dir"),route_name:val("route_name"),total_threads:parseInt(val("total_threads")||"16",10),
-  taxonomy_tool:val("taxonomy_tool"),contig_taxonomy:val("contig_taxonomy"),use_eggnog:val("use_eggnog")};}
+  taxonomy_tool:val("taxonomy_tool"),contig_taxonomy:val("contig_taxonomy"),use_eggnog:val("use_eggnog")};
+  var rows=[];document.querySelectorAll(".s-inc").forEach(function(cb){
+    if(!cb.checked)return;var i=cb.getAttribute("data-i");
+    var idInp=document.querySelector('.s-id[data-i="'+i+'"]');
+    var src=SAMPLES[i];if(!src)return;
+    rows.push({sample_id:(idInp?idInp.value:src.sample_id).trim(),r1:src.r1,r2:src.r2});});
+  if(rows.length)o.samples=rows;
+  return o;}
 function save(){fetch(api("/save"),{method:"POST",headers:{"Content-Type":"application/json"},
   body:JSON.stringify(collect())}).then(function(r){return r.json();}).then(function(j){
    var box=document.getElementById("result");

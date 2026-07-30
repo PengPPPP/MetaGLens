@@ -51,6 +51,35 @@ All commands accept `-c/--config PATH` (default `metaglens.yaml`).
 `--only` and `--from` steps are validated against the selected route, so a
 misspelled stage id fails fast instead of silently running nothing.
 
+## Sample discovery
+
+MetaGLens pairs reads automatically, supporting `_R1_001/_R2_001`, `_R1/_R2`,
+`_1/_2`, and `.1/.2`. Both flat and nested layouts work:
+
+```
+flat                          nested (per-sample directories)
+raw/S1_R1.fastq.gz            raw/SampleA/SampleA_R1.fastq.gz
+raw/S1_R2.fastq.gz            raw/SampleA/SampleA_R2.fastq.gz
+
+nested (generic filenames, sample = directory name)
+raw/S1/reads_1.fq.gz   raw/S2/reads_1.fq.gz
+raw/S1/reads_2.fq.gz   raw/S2/reads_2.fq.gz
+```
+
+- **Mates are only ever paired inside one directory.** An R1 from one folder can
+  never be matched with an R2 from another, so samples cannot be silently
+  swapped.
+- **Sample ids** come from the file name when those are unique; otherwise from
+  the parent directory name. If both collide, discovery **fails and asks for a
+  manifest** rather than inventing numbering.
+- Sub-directories are scanned up to 3 levels deep; hidden directories are
+  skipped and symlink loops are handled.
+- `metaglens init` and `metaglens configure` show the detected convention,
+  layout, and where ids came from, and let you **rename or exclude** samples.
+  Doing so writes a `samples.tsv`.
+- A `samples.tsv` manifest (columns `sample_id`, `r1`, `r2`) is the ultimate
+  fallback — set `sample_manifest` in the config and it is used verbatim.
+
 ## Web configuration (optional)
 
 If your server has a desktop/browser, `metaglens configure` opens a local web

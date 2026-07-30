@@ -178,14 +178,14 @@ class TestSamples(TempDirCase):
             with self.subTest(convention=label):
                 raw = self.tmp / f"raw{label.replace('/', '_').replace('.', 'd')}"
                 _make_reads(raw, ["S1", "S2"], r1, r2)
-                found, detected = samples_mod.discover(str(raw))
+                found, detected = samples_mod.discover(str(raw))[:2]
                 self.assertEqual(detected, label)
                 self.assertEqual([s.sample_id for s in found], ["S1", "S2"])
 
     def test_paths_are_absolute(self):
         raw = self.tmp / "abs"
         _make_reads(raw, ["S1"])
-        found, _ = samples_mod.discover(str(raw))
+        found, _ = samples_mod.discover(str(raw))[:2]
         self.assertTrue(Path(found[0].r1).is_absolute())
 
     def test_unpaired_file_is_not_reported_as_sample(self):
@@ -208,7 +208,7 @@ class TestSamples(TempDirCase):
     def test_manifest_round_trip(self):
         raw = self.tmp / "mf"
         _make_reads(raw, ["S1", "S2"])
-        found, _ = samples_mod.discover(str(raw))
+        found, _ = samples_mod.discover(str(raw))[:2]
         path = self.tmp / "samples.tsv"
         samples_mod.write_manifest(found, str(path))
         header = path.read_text(encoding="utf-8").splitlines()[0]
@@ -1038,6 +1038,125 @@ class TestMonitor(unittest.TestCase):
         html = out.read_text(encoding="utf-8")
         self.assertIn('http-equiv="refresh"', html)
         self.assertIn("MetaGLens Monitor", html)
+
+
+class TestNestedDiscovery(TempDirCase):
+    """Phase 7: recursive discovery with safe id derivation."""
+
+    def _pair(self, d: Path, r1: str, r2: str):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / r1).write_bytes(b"")
+        (d / r2).write_bytes(b"")
+
+    def test_layout1_per_sample_directories(self):
+        raw = self.tmp / "l1"
+        self._pair(raw / "SampleA", "SampleA_R1.fastq.gz", "SampleA_R2.fastq.gz")
+        self._pair(raw / "SampleB", "SampleB_R1.fastq.gz", "SampleB_R2.fastq.gz")
+        res = samples_mod.discover(str(raw))
+        self.assertEqual([s.sample_id for s in res.samples], ["SampleA", "SampleB"])
+        self.assertEqual(res.layout, "nested")
+        self.assertEqual(res.id_source, "filename")
+
+    def test_layout2_generic_names_use_dirname(self):
+        raw = self.tmp / "l2"
+        self._pair(raw / "S1", "reads_1.fq.gz", "reads_2.fq.gz")
+        self._pair(raw / "S2", "reads_1.fq.gz", "reads_2.fq.gz")
+        res = samples_mod.discover(str(raw))
+        self.assertEqual(sorted(s.sample_id for s in res.samples), ["S1", "S2"])
+        self.assertEqual(res.layout, "nested")
+        self.assertEqual(res.id_source, "dirname")
+        for s in res.samples:
+            self.assertEqual(Path(s.r1).parent, Path(s.r2).parent)
+            self.assertEqual(Path(s.r1).parent.name, s.sample_id)
+
+    def test_never_pairs_across_directories(self):
+        """Counter-example: a lone R1 in one dir and a lone R2 in another."""
+        raw = self.tmp / "split"
+        (raw / "dirA").mkdir(parents=True)
+        (raw / "dirB").mkdir(parents=True)
+        (raw / "dirA" / "X_R1.fastq.gz").write_bytes(b"")
+        (raw / "dirB" / "X_R2.fastq.gz").write_bytes(b"")
+        with self.assertRaises(samples_mod.SampleDiscoveryError):
+            samples_mod.discover(str(raw))
+
+    def test_ambiguous_ids_demand_manifest(self):
+        raw = self.tmp / "amb"
+        self._pair(raw / "run1" / "S", "reads_1.fq.gz", "reads_2.fq.gz")
+        self._pair(raw / "run2" / "S", "reads_1.fq.gz", "reads_2.fq.gz")
+        with self.assertRaises(samples_mod.SampleDiscoveryError) as ctx:
+            samples_mod.discover(str(raw))
+        self.assertIn("manifest", str(ctx.exception))
+
+    def test_symlink_loop_does_not_hang(self):
+        raw = self.tmp / "loop"
+        self._pair(raw / "SampleA", "SampleA_R1.fastq.gz", "SampleA_R2.fastq.gz")
+        try:
+            (raw / "SampleA" / "back").symlink_to(raw, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        res = samples_mod.discover(str(raw))
+        self.assertEqual([s.sample_id for s in res.samples], ["SampleA"])
+
+    def test_depth_limit_truncates(self):
+        raw = self.tmp / "deep"
+        self._pair(raw / "lvl1", "A_R1.fastq.gz", "A_R2.fastq.gz")
+        self._pair(raw / "a" / "b" / "c" / "d", "Z_R1.fastq.gz", "Z_R2.fastq.gz")
+        res = samples_mod.discover(str(raw))
+        ids = [s.sample_id for s in res.samples]
+        self.assertIn("A", ids)
+        self.assertNotIn("Z", ids)
+
+    def test_flat_layout_regression(self):
+        raw = self.tmp / "flat"
+        _make_reads(raw, ["S1", "S2"])
+        res = samples_mod.discover(str(raw))
+        self.assertEqual([s.sample_id for s in res.samples], ["S1", "S2"])
+        self.assertEqual(res.pattern, "_R1/_R2")
+        self.assertEqual(res.layout, "flat")
+        self.assertEqual(res.id_source, "filename")
+        self.assertEqual(Path(res.samples[0].r1),
+                         (raw / "S1_R1.fastq.gz").resolve())
+
+
+class TestEditableSampleTable(TempDirCase):
+    """Phase 7.5: the web table may rename / exclude samples."""
+
+    def _base(self, raw: Path) -> dict:
+        return dict(project_name="demo", work_dir=str(self.tmp / "w"),
+                    raw_data_dir=str(raw), route_name="mag_per_sample")
+
+    def test_edited_samples_written_as_manifest(self):
+        from metaglens.express import webconfig
+        raw = self.tmp / "raw"
+        _make_reads(raw, ["S1", "S2"])
+        found = samples_mod.discover(str(raw)).samples
+        payload = self._base(raw)
+        payload["samples"] = [
+            {"sample_id": "renamed", "r1": found[0].r1, "r2": found[0].r2}
+        ]
+        out = str(self.tmp / "cfg.yaml")
+        ok, errs, _ = webconfig.save_config(payload, out)
+        self.assertTrue(ok, errs)
+        manifest = self.tmp / "samples.tsv"
+        self.assertTrue(manifest.is_file())
+        rows = samples_mod.read_manifest(str(manifest))
+        self.assertEqual([r.sample_id for r in rows], ["renamed"])
+
+    def test_duplicate_ids_in_table_rejected(self):
+        from metaglens.express import webconfig
+        raw = self.tmp / "raw2"
+        _make_reads(raw, ["S1", "S2"])
+        found = samples_mod.discover(str(raw)).samples
+        payload = self._base(raw)
+        payload["samples"] = [
+            {"sample_id": "same", "r1": found[0].r1, "r2": found[0].r2},
+            {"sample_id": "same", "r1": found[1].r1, "r2": found[1].r2},
+        ]
+        out = str(self.tmp / "cfg2.yaml")
+        ok, errs, _ = webconfig.save_config(payload, out)
+        self.assertFalse(ok)
+        self.assertTrue(errs)
+        self.assertFalse(Path(out).exists())
 
 
 if __name__ == "__main__":

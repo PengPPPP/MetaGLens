@@ -63,24 +63,64 @@ def run_wizard(console: Console) -> Config:
     # ─── Sample discovery ────────────────────────────────────────────────
     console.print("\n[cyan]Discovering paired samples...[/cyan]")
     try:
-        found, pattern = samples_mod.discover(cfg.raw_data_dir)
+        found, pattern, layout, id_source = samples_mod.discover(cfg.raw_data_dir)
         cfg.sample_pattern = pattern
 
-        table = Table(title=f"Discovered {len(found)} paired sample(s) — convention: {pattern}")
+        table = Table(
+            title=(f"Discovered {len(found)} paired sample(s) — convention: {pattern} "
+                   f"· layout: {layout} · ids from: {id_source}")
+        )
         table.add_column("#", justify="right")
         table.add_column("Sample ID", style="cyan")
+        if layout == "nested":
+            table.add_column("Directory")
         table.add_column("R1")
         table.add_column("R2")
         for i, s in enumerate(found[:10], 1):
-            table.add_row(str(i), s.sample_id,
-                          Path(s.r1).name, Path(s.r2).name)
+            row = [str(i), s.sample_id]
+            if layout == "nested":
+                row.append(Path(s.r1).parent.name)
+            row += [Path(s.r1).name, Path(s.r2).name]
+            table.add_row(*row)
         if len(found) > 10:
-            table.add_row("...", f"+{len(found)-10} more", "", "")
+            pad = [""] * (3 if layout == "nested" else 2)
+            table.add_row("...", f"+{len(found)-10} more", *pad)
         console.print(table)
 
-        use = _menu(console, "Use these samples?", ["Yes", "No, I will provide a manifest"],
+        use = _menu(console, "Use these samples?",
+                    ["Yes",
+                     "Exclude some samples",
+                     "No, I will provide a manifest"],
                     default="1")
-        if use.startswith("No"):
+        if use.startswith("Exclude"):
+            raw_sel = _ask(
+                console,
+                "Numbers to EXCLUDE (comma-separated, as shown above)", "")
+            drop = set()
+            for tok in raw_sel.split(","):
+                tok = tok.strip()
+                if tok.isdigit():
+                    drop.add(int(tok))
+            kept = [s for i, s in enumerate(found, 1) if i not in drop]
+            if not kept:
+                console.print("  [yellow]Everything excluded — keeping all samples.[/yellow]")
+                kept = found
+            try:
+                samples_mod._validate(kept)
+            except samples_mod.SampleDiscoveryError as exc:
+                console.print(f"  [yellow]Selection rejected:[/yellow] {exc}")
+                kept = found
+            manifest_path = str(Path.cwd() / "samples.tsv")
+            samples_mod.write_manifest(kept, manifest_path)
+            cfg.sample_manifest = manifest_path
+            console.print(
+                f"  [green]✓[/green] Kept {len(kept)}/{len(found)} sample(s) → "
+                f"{manifest_path}"
+            )
+            console.print(
+                "  [dim]Edit that samples.tsv to rename ids or fix pairing.[/dim]"
+            )
+        elif use.startswith("No"):
             manifest = _ask(console, "Path to samples.tsv manifest", "")
             cfg.sample_manifest = manifest
     except samples_mod.SampleDiscoveryError as exc:
