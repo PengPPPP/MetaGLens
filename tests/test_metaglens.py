@@ -2967,5 +2967,123 @@ class TestShowcaseExport(unittest.TestCase):
         self.assertIn("NO scientific results", page)      # honesty line
 
 
+class TestShowcaseAttackPanel(unittest.TestCase):
+    """Phase 18: the attack panel is backed by the real repair boundary check."""
+
+    def test_canonical_results_are_real(self):
+        from metaglens.showcase import attacks
+        results = {r["key"]: r for r in attacks.run_canonical()}
+        # The scientific / smuggled / bad-op probes must be refused ...
+        for key in ("sci_min_contig", "sci_completeness", "smuggle", "bad_op"):
+            self.assertTrue(results[key]["refused"], key)
+        # ... and the legal resource change allowed.
+        self.assertFalse(results["legal"]["refused"])
+        # Messages are the real ones from repair.check_allowed, not canned text.
+        self.assertIn("min_contig_len", results["sci_min_contig"]["message"])
+        self.assertIn("min_length", results["smuggle"]["message"])
+        self.assertIn("whitelist", results["bad_op"]["message"])
+
+    def test_evaluate_matches_repair_check(self):
+        """The panel must call the same code the pipeline uses."""
+        from metaglens.showcase import attacks
+        from metaglens.decide import repair
+        # A field repair forbids -> refused here too.
+        self.assertTrue(attacks.evaluate("reduce_parallel", "s",
+                                        {"ani_threshold": "70"})["refused"])
+        # A resource field -> allowed here too.
+        self.assertFalse(attacks.evaluate("reduce_parallel", "s",
+                                         {"parallel_jobs": 2})["refused"])
+        # Cross-check against repair directly.
+        with self.assertRaises(repair.RepairRefused):
+            repair.check_allowed(repair.RepairPlan(
+                op="reduce_parallel", stage="s", changes={"ani_threshold": "70"}))
+
+    def test_evaluate_never_executes_only_inspects(self):
+        """Even a hostile field name is merely refused, never run."""
+        from metaglens.showcase import attacks
+        res = attacks.evaluate("reduce_parallel", "s",
+                               {"__import__('os').system('x')": 1})
+        self.assertTrue(res["refused"])   # not a resource field -> refused
+
+    def test_evaluate_bounds_change_count(self):
+        from metaglens.showcase import attacks
+        many = {f"f{i}": i for i in range(50)}
+        res = attacks.evaluate("reduce_parallel", "s", many)
+        self.assertLessEqual(len(res["changes"]), 8)
+
+    def test_page_bakes_attacks_and_real_audit(self):
+        import json, re
+        from metaglens.showcase.page import build_page
+        page = build_page(static=True)
+        boot = json.loads(re.search(r"var BOOT=(\{.*?\});", page, re.S).group(1))
+        self.assertEqual(len(boot["attacks"]), 5)
+        self.assertTrue(any(a["refused"] for a in boot["attacks"]))
+        self.assertTrue(any(not a["refused"] for a in boot["attacks"]))
+        # Audit numbers are present and numeric (real, not a stale literal).
+        audit = dict(boot["audit"])
+        self.assertIn("tests", audit)
+        self.assertTrue(audit["tests"].isdigit())
+        # History + attack sections and honesty line all present.
+        self.assertIn('id="history"', page)
+        self.assertIn('id="attack"', page)
+        self.assertIn("NO scientific results", page)
+
+    def test_history_frames_ai_coding_not_ai4s_product(self):
+        """The narrative must say the product runs with zero AI."""
+        from metaglens.showcase.page import build_page
+        page = build_page(static=True)
+        self.assertIn("AI Coding", page)
+        self.assertIn("zero AI", page)   # runtime has no AI — the key point
+
+
+@unittest.skipIf(shutil.which("bash") is None, "bash unavailable")
+class TestShowcaseAttackEndpoint(unittest.TestCase):
+    """Phase 18: /api/attack runs the real check on judge input, safely."""
+
+    def _server(self):
+        from metaglens.showcase import build_app, JobManager
+        mgr = JobManager()
+        srv = build_app(manager=mgr, host="127.0.0.1", port=0)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(lambda: (srv.shutdown(), srv.server_close(), mgr.shutdown()))
+        return f"http://127.0.0.1:{port}"
+
+    def _post(self, base, path, obj):
+        import urllib.request, urllib.error
+        req = urllib.request.Request(base + path, data=json.dumps(obj).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=8) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def test_attack_endpoint_refuses_scientific_field(self):
+        base = self._server()
+        code, body = self._post(base, "/api/attack",
+                                {"op": "reduce_parallel", "stage": "s",
+                                 "changes": {"completeness_min": 5}})
+        self.assertEqual(code, 200)
+        self.assertTrue(body["refused"])
+        self.assertIn("completeness_min", body["message"])
+
+    def test_attack_endpoint_allows_resource_field(self):
+        base = self._server()
+        code, body = self._post(base, "/api/attack",
+                                {"op": "reduce_parallel", "stage": "s",
+                                 "changes": {"parallel_jobs": 2}})
+        self.assertEqual(code, 200)
+        self.assertFalse(body["refused"])
+
+    def test_attack_endpoint_hostile_input_is_refused_not_run(self):
+        base = self._server()
+        code, body = self._post(base, "/api/attack",
+                                {"op": "delete_everything", "stage": "s",
+                                 "changes": {"x": 1}})
+        self.assertEqual(code, 200)
+        self.assertTrue(body["refused"])   # non-whitelisted op
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

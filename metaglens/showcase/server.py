@@ -131,7 +131,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path != "/api/run":
+        if parsed.path not in ("/api/run", "/api/attack"):
             self._send(404, b"not found", "text/plain; charset=utf-8")
             return
         length = int(self.headers.get("Content-Length", 0) or 0)
@@ -144,8 +144,18 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._json({"ok": False, "error": "invalid JSON"}, code=400)
             return
-        # The only thing a request may choose is a route name, validated against
-        # a whitelist inside the manager. Never a command, never a path.
+
+        if parsed.path == "/api/attack":
+            # Runs the REAL repair boundary check on the probe. Safe: the check
+            # only inspects and raises, it never executes anything.
+            from .attacks import evaluate
+            result = evaluate(payload.get("op", ""), payload.get("stage", ""),
+                              payload.get("changes", {}))
+            self._json(result)
+            return
+
+        # /api/run — the only thing a request may choose is a route name,
+        # validated against a whitelist inside the manager. Never a command.
         route = str(payload.get("route", "")).strip()
         result = self.server.manager.submit(route)
         self._json(result, code=200 if result.get("ok") else 429)
