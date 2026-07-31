@@ -33,3 +33,6 @@ metaglens_results/
 .qoder/
 *.swp
 .DS_Store
+
+# 本地预览产物(非源码)
+preview/

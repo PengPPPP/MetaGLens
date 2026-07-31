@@ -85,8 +85,26 @@ _TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>MetaGLens — live demo</title>
 <style>/*__CSS__*/
-.hero{max-width:1180px;margin:0 auto;padding:8px 34px 0;}
-.hero h1{font-size:34px;margin:6px 0;}
+/* ---- Showcase header/hero: scoped overrides so report.html & monitor.html
+   keep their own compact header. The demo page needs a proper title block. ---- */
+header{padding:30px 34px 10px;align-items:flex-start;gap:26px;
+  max-width:1180px;margin:0 auto;}
+.logo{height:190px;margin:-26px 0 -26px -18px;}   /* the PNG carries wide internal
+   padding, so it must render larger and be pulled back to look optically right */
+.headline{margin-left:0;text-align:left;align-self:center;}
+.headline .t{font-size:52px;line-height:1.05;letter-spacing:-.5px;
+  color:var(--navy);}
+.headline .d{font-size:19px;margin-top:6px;color:var(--muted);}
+.langsw{margin-left:auto;align-self:center;display:flex;gap:6px;}
+.hero{max-width:1180px;margin:0 auto;padding:4px 34px 0;}
+.hero h1{font-size:30px;margin:10px 0 8px;color:var(--ink);font-weight:700;}
+@media(max-width:860px){
+  header{flex-direction:column;align-items:center;text-align:center;padding:20px 18px 6px;}
+  .logo{height:150px;margin:-18px 0;}
+  .headline{text-align:center;} .headline .t{font-size:38px;}
+  .langsw{margin:8px auto 0;}
+  .hero{padding:4px 18px 0;} .hero h1{font-size:24px;}
+}
 .lead{font-size:18px;color:var(--ink-soft);max-width:820px;}
 .honesty{background:rgba(217,138,36,.12);border:1px solid var(--warn);border-radius:12px;
   padding:12px 16px;margin:16px 0;color:var(--ink);font-size:15.5px;}
@@ -103,7 +121,6 @@ _TEMPLATE = r"""<!DOCTYPE html>
 .viewer{width:100%;height:560px;border:1px solid var(--line);border-radius:12px;background:#fff;}
 pre.script{background:#0d1b2a;color:#cfe0f6;padding:16px;border-radius:12px;overflow:auto;
   max-height:460px;font-family:monospace;font-size:12.5px;line-height:1.5;}
-.langsw{margin-left:auto;}
 .audit{display:flex;gap:14px;flex-wrap:wrap;}
 .hist{display:flex;flex-direction:column;gap:12px;}
 .histrow{display:flex;gap:14px;align-items:flex-start;}
