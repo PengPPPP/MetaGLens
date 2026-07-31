@@ -215,7 +215,6 @@ def export_static(out_dir: str, route: str = "mag_per_sample") -> Path:
     tmp = tempfile.mkdtemp(prefix="metaglens_export_")
     try:
         result = run_demo(route, workdir=tmp)
-        (out / "index.html").write_text(build_page(static=True), encoding="utf-8")
         report = result.get("report_html", "")
         monitor = result.get("monitor_html", "")
         if report and Path(report).is_file():
@@ -226,8 +225,27 @@ def export_static(out_dir: str, route: str = "mag_per_sample") -> Path:
         from .jobs import SHOWCASE_SCRIPT_STAGE
         script = (Path(result.get("root", "")) / "work" / "metaglens_results"
                   / routes.STEPS[SHOWCASE_SCRIPT_STAGE].script)
+        script_text = ""
         if script.is_file():
             (out / "script.txt").write_bytes(script.read_bytes())
+            script_text = script.read_text(encoding="utf-8", errors="replace")
+
+        # Inline the artefacts into the page. A judge may well download the export
+        # and open index.html straight off disk, and under file:// a browser
+        # refuses fetch() of sibling files (opaque origin) and can block the
+        # report iframe too. Inlining keeps the export working from disk as well
+        # as over http://; the separate files stay for direct viewing.
+        report_text = ""
+        if report and Path(report).is_file():
+            report_text = Path(report).read_text(encoding="utf-8", errors="replace")
+        (out / "index.html").write_text(
+            build_page(static=True, boot_extra={
+                "scriptText": script_text,
+                "reportHtml": report_text,
+                "scriptName": routes.STEPS[SHOWCASE_SCRIPT_STAGE].script,
+            }),
+            encoding="utf-8",
+        )
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)

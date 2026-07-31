@@ -72,11 +72,16 @@ def build_page(static: bool = False, boot_extra: dict = None) -> str:
             "audit": _audit_stats()}
     if boot_extra:
         boot.update(boot_extra)
+    # The payload can carry whole HTML documents (the exported report), and a
+    # bare "</script>" inside a <script> block ends it early — which would
+    # truncate BOOT and break the page. "<\/" is a valid JSON escape for "/",
+    # so this is lossless and the standard mitigation.
+    boot_json = json.dumps(boot, ensure_ascii=False).replace("</", "<\\/")
     return (
         _TEMPLATE
         .replace("/*__CSS__*/", REPORT_CSS)
         .replace("<!--__LENS__-->", LENS_SVG)
-        .replace("/*__BOOT__*/", json.dumps(boot, ensure_ascii=False))
+        .replace("/*__BOOT__*/", boot_json)
     )
 
 
@@ -327,11 +332,19 @@ function setStages(list){var box=$("#stages");box.innerHTML="";(list||[]).forEac
   var cls=s.status==="completed"?"done":(s.status==="running"?"running":(s.status==="failed"?"failed":""));
   row.innerHTML='<span class="dot '+cls+'"></span>'+s.step+' <span class="hint">'+(s.status||"")+'</span>';
   box.appendChild(row);});}
+function showBaked(){
+  // Static export: render from content inlined in this file, so it works when
+  // opened straight off disk (file:// forbids fetch() of sibling files).
+  if(BOOT.reportHtml){$("#report-frame").srcdoc=BOOT.reportHtml;}
+  else{$("#report-frame").src="report.html";}
+  if(BOOT.scriptText){$("#script-box").textContent=BOOT.scriptText;}
+  else{fetch("script.txt").then(function(r){return r.text();})
+        .then(function(x){$("#script-box").textContent=x;}).catch(function(){});}
+}
 function startRun(){
   if(BOOT.static){ // backend-free export: show the pre-baked artefacts
     $("#run-msg").textContent="(static export — showing a pre-recorded run)";
-    $("#report-frame").src="report.html";
-    fetch("script.txt").then(function(r){return r.text();}).then(function(x){$("#script-box").textContent=x;}).catch(function(){});
+    showBaked();
     return;
   }
   var btn=$("#runbtn");btn.disabled=true;$("#run-msg").textContent="starting...";
@@ -356,6 +369,9 @@ function poll(id){
   },700);
 }
 applyI18n();
+// In a static export the artefacts already exist, so show them immediately.
+// Leaving the report pane blank until someone presses Run reads as "broken".
+if(BOOT.static){showBaked();}
 </script>
 </body></html>
 """
