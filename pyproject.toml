@@ -24,6 +24,7 @@ packages = [
     "metaglens.express",
     "metaglens.observe",
     "metaglens.demo",
+    "metaglens.showcase",
 ]
 
 [tool.setuptools.package-data]

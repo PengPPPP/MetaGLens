@@ -2776,5 +2776,196 @@ class TestBoundedRepair(TempDirCase):
         self.assertIn("no safe automatic repair", out["reason"])
 
 
+class TestShowcaseJobs(unittest.TestCase):
+    """Phase 18: bounded, whitelisted, self-cleaning demo runner."""
+
+    def _fake_result(self, route="mag_per_sample", ok=True):
+        d = Path(tempfile.mkdtemp(prefix="mg_sc_test_"))
+        (d / "work" / "metaglens_results").mkdir(parents=True)
+        (d / "work" / "metaglens_results" / "02_assembly.sh").write_text(
+            "#!/bin/bash\n# rendered stage\nexit 0\n", encoding="utf-8")
+        rep = d / "report.html"; rep.write_text("<html>report</html>", encoding="utf-8")
+        return {"route": route, "ok": ok, "root": str(d),
+                "report_html": str(rep), "monitor_html": "",
+                "stages": [{"step": "01_qc", "status": "completed"}],
+                "errors": [] if ok else ["boom"]}
+
+    def test_rejects_non_whitelisted_route(self):
+        from metaglens.showcase import JobManager
+        mgr = JobManager(runner=lambda route: self._fake_result(route))
+        self.addCleanup(mgr.shutdown)
+        res = mgr.submit("; rm -rf /")
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["status"], "rejected")
+
+    def test_run_completes_and_exposes_artefacts(self):
+        from metaglens.showcase import JobManager
+        results = {}
+        def runner(route):
+            r = self._fake_result(route); results[route] = r; return r
+        mgr = JobManager(runner=runner)
+        self.addCleanup(mgr.shutdown)
+        res = mgr.submit("mag_per_sample")
+        self.assertTrue(res["ok"])
+        jid = res["id"]
+        for _ in range(200):
+            job = mgr.get(jid)
+            if job.status in ("done", "failed", "timeout"):
+                break
+            time.sleep(0.02)
+        self.assertEqual(job.status, "done")
+        self.assertTrue(job.report_path)
+        self.assertIn("#!/bin/bash", job.script_text)
+        pub = job.public()
+        # public view must not leak a filesystem path
+        self.assertNotIn("root", pub)
+        self.assertNotIn("/tmp", json.dumps(pub))
+
+    def test_queue_limit_returns_busy(self):
+        from metaglens.showcase import JobManager
+        started = threading.Event(); release = threading.Event()
+        def slow(route):
+            started.set(); release.wait(5); return self._fake_result(route)
+        mgr = JobManager(queue_limit=2, runner=slow)
+        self.addCleanup(lambda: (release.set(), mgr.shutdown()))
+        a = mgr.submit("mag_per_sample"); self.assertTrue(a["ok"])
+        started.wait(2)
+        b = mgr.submit("mag_per_sample"); self.assertTrue(b["ok"])   # queued
+        c = mgr.submit("mag_per_sample")                              # over limit
+        self.assertFalse(c["ok"])
+        self.assertEqual(c["status"], "busy")
+        release.set()
+
+    def test_timeout_is_bounded(self):
+        from metaglens.showcase import JobManager
+        def hang(route):
+            time.sleep(10); return self._fake_result(route)
+        mgr = JobManager(run_timeout=0.3, runner=hang)
+        self.addCleanup(mgr.shutdown)
+        jid = mgr.submit("mag_per_sample")["id"]
+        for _ in range(200):
+            job = mgr.get(jid)
+            if job.status in ("done", "failed", "timeout"):
+                break
+            time.sleep(0.02)
+        self.assertEqual(job.status, "timeout")
+
+    def test_old_runs_are_cleaned_up(self):
+        from metaglens.showcase import JobManager
+        roots = []
+        def runner(route):
+            r = self._fake_result(route); roots.append(r["root"]); return r
+        mgr = JobManager(keep_runs=2, runner=runner)
+        self.addCleanup(mgr.shutdown)
+        for _ in range(5):
+            jid = mgr.submit("mag_per_sample")["id"]
+            for _ in range(200):
+                if mgr.get(jid).status in ("done", "failed", "timeout"):
+                    break
+                time.sleep(0.02)
+        time.sleep(0.1)
+        # The earliest run trees must have been removed.
+        survivors = [r for r in roots if Path(r).exists()]
+        self.assertLessEqual(len(survivors), 3)
+
+
+@unittest.skipIf(shutil.which("bash") is None, "bash unavailable")
+class TestShowcaseServer(unittest.TestCase):
+    """Phase 18: read-only HTTP surface; the security posture is the point."""
+
+    def _server(self, runner=None):
+        from metaglens.showcase import build_app, JobManager
+        mgr = JobManager(runner=runner) if runner else JobManager()
+        srv = build_app(manager=mgr, host="127.0.0.1", port=0)
+        port = srv.server_address[1]
+        th = threading.Thread(target=srv.serve_forever, daemon=True); th.start()
+        self.addCleanup(lambda: (srv.shutdown(), srv.server_close(), mgr.shutdown()))
+        return f"http://127.0.0.1:{port}", mgr
+
+    def _code(self, base, path, method="GET", body=None):
+        import urllib.request, urllib.error
+        try:
+            if method == "POST":
+                req = urllib.request.Request(
+                    base + path, data=json.dumps(body or {}).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST")
+            else:
+                req = urllib.request.Request(base + path, method=method)
+            with urllib.request.urlopen(req, timeout=8) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def test_index_served(self):
+        base, _ = self._server()
+        code, body = self._code(base, "/")
+        self.assertEqual(code, 200)
+        self.assertIn(b"MetaGLens", body)
+        self.assertIn(b"NO scientific results", body)
+
+    def test_path_traversal_rejected(self):
+        base, _ = self._server()
+        code, _ = self._code(base, "/api/report?id=../../etc/passwd")
+        self.assertIn(code, (400, 404))
+
+    def test_bad_id_rejected(self):
+        base, _ = self._server()
+        code, _ = self._code(base, "/api/status?id=%3Brm%20-rf")
+        self.assertEqual(code, 400)
+
+    def test_injection_route_refused(self):
+        base, _ = self._server()
+        code, body = self._code(base, "/api/run", "POST", {"route": "; rm -rf /"})
+        self.assertNotEqual(code, 200)
+        self.assertFalse(json.loads(body)["ok"])
+
+    def test_no_write_endpoint(self):
+        base, _ = self._server()
+        # webconfig's /save must not exist on the public showcase.
+        code, _ = self._code(base, "/save", "POST", {})
+        self.assertEqual(code, 404)
+
+    def test_oversized_body_rejected(self):
+        import urllib.request, urllib.error
+        base, _ = self._server()
+        req = urllib.request.Request(
+            base + "/api/run", data=b"x" * 99999,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=8) as r:
+                code = r.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        self.assertEqual(code, 413)
+
+    def test_unknown_run_id_is_404_not_500(self):
+        base, _ = self._server()
+        code, _ = self._code(base, "/api/status?id=deadbeef")
+        self.assertEqual(code, 404)
+
+
+class TestShowcaseExport(unittest.TestCase):
+    """Phase 18.A4: backend-free static export tells the whole story."""
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash unavailable")
+    def test_export_produces_complete_site(self):
+        from metaglens.showcase import export_static
+        d = Path(tempfile.mkdtemp(prefix="mg_export_test_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        export_static(str(d), route="mag_per_sample")
+        self.assertTrue((d / "index.html").is_file())
+        self.assertTrue((d / "report.html").stat().st_size > 500)
+        script = (d / "script.txt").read_text(encoding="utf-8")
+        self.assertTrue(script.startswith("#!/bin/bash") or "#SBATCH" in script[:200])
+        idx = (d / "index.html").read_text(encoding="utf-8")
+        self.assertIn('"static": true', idx)
+
+    def test_static_page_marks_stub_and_reuses_theme(self):
+        from metaglens.showcase.page import build_page
+        page = build_page(static=True)
+        self.assertIn("--brand:#38A8F0", page)            # shared theme
+        self.assertIn("NO scientific results", page)      # honesty line
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
