@@ -3187,6 +3187,42 @@ class TestStubDataRealism(unittest.TestCase):
                   / "community_matrix.tsv").read_text().splitlines()
         self.assertGreaterEqual(len(matrix) - 1, 5, "expected a multi-taxon community")
 
+    def test_community_matrix_has_enough_taxa_for_topn(self):
+        """The report's top-10/top-15/All switcher must actually change the
+        view: that needs more taxa than the top-N cutoffs. Also the per-sample
+        columns must differ, or the stacked chart is flat."""
+        from metaglens.demo import run_demo
+        d = Path(tempfile.mkdtemp(prefix="mg_topn_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        r = run_demo("mag_per_sample", workdir=str(d))
+        self.assertTrue(r["ok"], r["errors"])
+        lines = (d / "work" / "metaglens_results" / "10_community"
+                 / "community_matrix.tsv").read_text().splitlines()
+        rows = [l.split("\t") for l in lines[1:] if l.strip()]
+        self.assertGreaterEqual(len(rows), 16,
+                                "need >15 taxa for top15 vs All to differ")
+        cols = len(lines[0].split("\t")) - 1
+        self.assertGreaterEqual(cols, 2, "community matrix should be per-sample")
+        for row in rows[:cols]:
+            vals = row[1:cols + 1]
+            self.assertGreater(len(set(vals)), 1,
+                               "per-sample composition must not be identical")
+
+    def test_kraken_report_varies_per_sample(self):
+        """Sample-parameterised kraken reports must differ: identical per-sample
+        compositions in the contig route were a demo-data defect."""
+        from metaglens.demo import stubdata as sd
+        import tempfile, os
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        a, b = os.path.join(d, "a.txt"), os.path.join(d, "b.txt")
+        sd.gen_kraken_report(a, sample="S1")
+        sd.gen_kraken_report(b, sample="S2")
+        self.assertNotEqual(open(a).read(), open(b).read())
+        # Same sample twice must reproduce byte-identically.
+        c = os.path.join(d, "c.txt")
+        sd.gen_kraken_report(c, sample="S1")
+        self.assertEqual(open(a).read(), open(c).read())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

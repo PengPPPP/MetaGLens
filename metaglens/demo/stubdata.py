@@ -22,8 +22,11 @@ import zlib
 
 SEED = 20260731
 
-# A plausible gut community: 10 species across 8 genera, with realistic GTDB
-# lineages and relative-abundance weights (a couple of dominants + a long tail).
+# A plausible gut community: 30 species across 24 genera (2 Archaea included),
+# with realistic GTDB lineages and relative-abundance weights (a couple of
+# dominants + a long tail). The long tail matters for the delivery report:
+# its composition chart offers top-10 / top-15 / All views, which only differ
+# when there are more taxa than the top-N cutoffs.
 LINEAGES = [
     ("Bacteroides vulgatus",
      "d__Bacteria;p__Bacteroidota;c__Bacteroidia;o__Bacteroidales;f__Bacteroidaceae;g__Bacteroides;s__Bacteroides vulgatus",
@@ -55,6 +58,67 @@ LINEAGES = [
     ("Bacteroides thetaiotaomicron",
      "d__Bacteria;p__Bacteroidota;c__Bacteroidia;o__Bacteroidales;f__Bacteroidaceae;g__Bacteroides;s__Bacteroides thetaiotaomicron",
      1.0),
+    # ---- long tail: low-abundance but plausible gut members ----
+    ("Alistipes finegoldii",
+     "d__Bacteria;p__Bacteroidota;c__Bacteroidia;o__Bacteroidales;f__Rikenellaceae;g__Alistipes;s__Alistipes finegoldii",
+     0.8),
+    ("Parabacteroides distasonis",
+     "d__Bacteria;p__Bacteroidota;c__Bacteroidia;o__Bacteroidales;f__Tannerellaceae;g__Parabacteroides;s__Parabacteroides distasonis",
+     0.7),
+    ("Eubacterium rectale",
+     "d__Bacteria;p__Bacillota;c__Clostridia;o__Eubacteriales;f__Eubacteriaceae;g__Eubacterium;s__Eubacterium rectale",
+     0.6),
+    ("Dorea formicigenerans",
+     "d__Bacteria;p__Bacillota;c__Clostridia;o__Eubacteriales;f__Lachnospiraceae;g__Dorea;s__Dorea formicigenerans",
+     0.5),
+    ("Coprococcus comes",
+     "d__Bacteria;p__Bacillota;c__Clostridia;o__Eubacteriales;f__Lachnospiraceae;g__Coprococcus;s__Coprococcus comes",
+     0.45),
+    ("Collinsella aerofaciens",
+     "d__Bacteria;p__Actinomycetota;c__Coriobacteriia;o__Coriobacteriales;f__Coriobacteriaceae;g__Collinsella;s__Collinsella aerofaciens",
+     0.4),
+    ("Lactobacillus ruminis",
+     "d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;f__Lactobacillaceae;g__Lactobacillus;s__Lactobacillus ruminis",
+     0.35),
+    ("Streptococcus salivarius",
+     "d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;f__Streptococcaceae;g__Streptococcus;s__Streptococcus salivarius",
+     0.3),
+    ("Enterococcus faecalis",
+     "d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;f__Enterococcaceae;g__Enterococcus;s__Enterococcus faecalis",
+     0.25),
+    ("Clostridium butyricum",
+     "d__Bacteria;p__Bacillota;c__Clostridia;o__Eubacteriales;f__Clostridiaceae;g__Clostridium;s__Clostridium butyricum",
+     0.22),
+    ("Veillonella parvula",
+     "d__Bacteria;p__Bacillota;c__Negativicutes;o__Veillonellales;f__Veillonellaceae;g__Veillonella;s__Veillonella parvula",
+     0.2),
+    ("Desulfovibrio piger",
+     "d__Bacteria;p__Pseudomonadota;c__Deltaproteobacteria;o__Desulfovibrionales;f__Desulfovibrionaceae;g__Desulfovibrio;s__Desulfovibrio piger",
+     0.18),
+    ("Methanobrevibacter smithii",
+     "d__Archaea;p__Methanobacteriota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobrevibacter;s__Methanobrevibacter smithii",
+     0.15),
+    ("Anaerostipes caccae",
+     "d__Bacteria;p__Bacillota;c__Clostridia;o__Eubacteriales;f__Lachnospiraceae;g__Anaerostipes;s__Anaerostipes caccae",
+     0.12),
+    ("Butyricicoccus pullicaecorum",
+     "d__Bacteria;p__Bacillota;c__Clostridia;o__Eubacteriales;f__Oscillospiraceae;g__Butyricicoccus;s__Butyricicoccus pullicaecorum",
+     0.10),
+    ("Holdemanella biformis",
+     "d__Bacteria;p__Bacillota;c__Erysipelotrichia;o__Erysipelotrichales;f__Erysipelotrichaceae;g__Holdemanella;s__Holdemanella biformis",
+     0.08),
+    ("Subdoligranulum variabile",
+     "d__Bacteria;p__Bacillota;c__Clostridia;o__Eubacteriales;f__Oscillospiraceae;g__Subdoligranulum;s__Subdoligranulum variabile",
+     0.07),
+    ("Oscillibacter valericigenes",
+     "d__Bacteria;p__Bacillota;c__Clostridia;o__Eubacteriales;f__Oscillospiraceae;g__Oscillibacter;s__Oscillibacter valericigenes",
+     0.06),
+    ("Pyramidobacter piscolens",
+     "d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__Pyramidobacter;s__Pyramidobacter piscolens",
+     0.05),
+    ("Turicibacter sanguinis",
+     "d__Bacteria;p__Bacillota;c__Erysipelotrichia;o__Erysipelotrichales;f__Erysipelotrichaceae;g__Turicibacter;s__Turicibacter sanguinis",
+     0.04),
 ]
 
 _NUC = "ACGT"
@@ -192,16 +256,24 @@ def gen_coverage(rnames, out: str, sample: str = "") -> None:
                      f"{coverage:.2f}\t{depth_here:.3f}\t35.0\t42.0\n")
 
 
-def gen_kraken_report(out: str) -> None:
-    """A multi-taxon Kraken2 report (rank-coded), species rows dominate."""
+def gen_kraken_report(out: str, sample: str = "") -> None:
+    """A multi-taxon Kraken2 report (rank-coded), species rows dominate.
+
+    When ``sample`` is given, a deterministic per-(sample, species) multiplier
+    is applied so different samples show different compositions (the delivery
+    report renders one column per sample).
+    """
     r = random.Random(SEED)
     rows = []
     # Species-level rows (rank S) — these feed the community table.
     for species, lineage, weight in LINEAGES:
         taxid = 1000 + _stable_index(species, 9000)
-        reads = int(weight * r.uniform(800, 1200))
+        mult = 1.0
+        if sample:
+            mult = _rng(f"sample:{sample}:{species}").uniform(0.4, 1.6)
+        reads = int(weight * mult * r.uniform(800, 1200))
         genus = lineage.split(";")[-1].replace("s__", "")
-        rows.append((weight, reads, taxid, "S", species))
+        rows.append((weight * mult, reads, taxid, "S", species))
     total = sum(w for w, *_ in rows) or 1.0
     with open(out, "w") as fh:
         # A couple of higher-rank summary rows for realism.
@@ -211,13 +283,18 @@ def gen_kraken_report(out: str) -> None:
             fh.write(f"{pct:.2f}\t{int(weight*1000)}\t{reads}\t{rank}\t{taxid}\t{name}\n")
 
 
-def gen_bracken(out: str) -> None:
-    """Multi-taxon Bracken abundance output."""
+def gen_bracken(out: str, sample: str = "") -> None:
+    """Multi-taxon Bracken abundance output (per-sample when ``sample`` given)."""
     r = random.Random(SEED)
     with open(out, "w") as fh:
         fh.write("name\ttaxonomy_id\ttaxonomy_lvl\tkraken_assigned_reads\t"
                  "added_reads\tnew_est_reads\tfraction_total_reads\n")
-        weights = [(sp, w * r.uniform(0.9, 1.1)) for sp, _lin, w in LINEAGES]
+        weights = []
+        for sp, _lin, w in LINEAGES:
+            mult = 1.0
+            if sample:
+                mult = _rng(f"sample:{sample}:{sp}").uniform(0.4, 1.6)
+            weights.append((sp, w * mult * r.uniform(0.9, 1.1)))
         total = sum(w for _, w in weights)
         for species, weight in sorted(weights, key=lambda x: -x[1]):
             taxid = 1000 + _stable_index(species, 9000)
@@ -248,9 +325,9 @@ def main(argv) -> int:
         gen_coverage([ln.strip() for ln in sys.stdin], args[0],
                      args[1] if len(args) > 1 else "")
     elif cmd == "kraken_report":
-        gen_kraken_report(args[0])
+        gen_kraken_report(args[0], args[1] if len(args) > 1 else "")
     elif cmd == "bracken":
-        gen_bracken(args[0])
+        gen_bracken(args[0], args[1] if len(args) > 1 else "")
     else:
         print(f"unknown command: {cmd}", file=sys.stderr)
         return 2

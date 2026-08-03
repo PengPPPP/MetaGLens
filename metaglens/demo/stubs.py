@@ -602,7 +602,16 @@ if [[ -n "$OUT" ]]; then
 fi
 if [[ -n "$REP" ]]; then
   mkdir -p "$(dirname "$REP")"
-  python3 "$MG_STUBDATA" kraken_report "$REP"
+  # The report path encodes the sample (…/<SAMPLE>_report.txt or
+  # …/<SAMPLE>_contig_report.txt); pass it through so every sample gets its
+  # own composition instead of an identical copy.
+  SAMPLE=""
+  REP_BASE="$(basename "$REP")"
+  case "$REP_BASE" in
+    *_contig_report.txt) SAMPLE="${REP_BASE%_contig_report.txt}";;
+    *_report.txt)        SAMPLE="${REP_BASE%_report.txt}";;
+  esac
+  python3 "$MG_STUBDATA" kraken_report "$REP" "$SAMPLE"
 fi
 exit 0
 ''')
@@ -618,7 +627,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ -n "$OUT" ]]; then
-  python3 "$MG_STUBDATA" bracken "$OUT"
+  mkdir -p "$(dirname "$OUT")"
+  # …/<SAMPLE>_bracken.out — pass the sample for per-sample composition.
+  SAMPLE=""
+  OUT_BASE="$(basename "$OUT")"
+  case "$OUT_BASE" in
+    *_bracken.out) SAMPLE="${OUT_BASE%_bracken.out}";;
+  esac
+  python3 "$MG_STUBDATA" bracken "$OUT" "$SAMPLE"
 fi
 exit 0
 ''')

@@ -2,7 +2,7 @@
 #SBATCH --job-name=demo_assembly
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=64G
-#SBATCH --output=/tmp/metaglens_export_rni69bzq/contig_based/work/metaglens_results/reports/logs/02_assembly_%j.log
+#SBATCH --output=/tmp/metaglens_export_8g9pcmhc/contig_based/work/metaglens_results/reports/logs/02_assembly_%j.log
 
 set -euo pipefail
 
@@ -16,7 +16,7 @@ source "${SCRIPT_DIR}/pipeline_utils.sh"
 
 # ===== Parameters =====
 STEP_NAME="02_assembly"
-WORK_DIR="/tmp/metaglens_export_rni69bzq/contig_based/work"
+WORK_DIR="/tmp/metaglens_export_8g9pcmhc/contig_based/work"
 CONDA_ENV="none"
 THREADS=2
 ASSEMBLER="megahit"
