@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="MetaGLens" width="100%">
+</p>
+
 # MetaGLens
 
 Reproducible shotgun-metagenomics pipeline orchestrator: paired raw reads →
@@ -14,12 +18,26 @@ tracking in `pipeline_status.json`.
 The generated scripts are **standalone and inspectable** — you can read, edit,
 and run them without MetaGLens once they are materialized.
 
+## Demo
+
+Configure, run, and inspect the whole pipeline in your browser — no installation
+required:
+
+<p align="center">
+  <img src="assets/demo.gif" alt="MetaGLens demo — configure, run, report" width="80%">
+</p>
+
+Run it yourself in seconds with `metaglens demo` (stub toolchain, no scientific
+output), or open the self-contained showcase page with `metaglens showcase`.
+
 ## Install
 
 ```bash
-pip install /home/h1020/MetaGLens        # from the project directory
+git clone https://github.com/PengPPPP/MetaGLens.git
+cd MetaGLens
+pip install .
 # or, for development:
-pip install -e /home/h1020/MetaGLens
+pip install -e .
 ```
 
 This installs the `metaglens` command. Python ≥ 3.8 and PyYAML are required.

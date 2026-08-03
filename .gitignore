@@ -36,3 +36,7 @@ metaglens_results/
 
 # 本地预览产物(非源码)
 preview/
+
+# README 源素材(压缩版在 assets/,原始文件不进仓库)
+/MetaGLens-software演示动图-单片尾循环版.gif
+/MetaGLens横幅.png
