@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import html as _html
 import json
-from importlib import resources
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -140,8 +139,9 @@ def _load_logo_b64(results_dir: Path) -> str:
         except OSError:
             pass
     try:
-        return resources.files("metaglens.templates").joinpath(
-            "report_logo.b64").read_text(encoding="utf-8").strip()
+        from .._resources import read_resource
+        return read_resource("metaglens.templates",
+                             "report_logo.b64").strip()
     except Exception:
         return ""
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import subprocess
-from importlib import resources
 from pathlib import Path
 from typing import Dict, List
 
@@ -29,9 +28,8 @@ def _yn(value: bool) -> str:
 
 def load_template(script_name: str) -> str:
     """Read a bundled template's raw text."""
-    return resources.files("metaglens.templates").joinpath(script_name).read_text(
-        encoding="utf-8"
-    )
+    from ._resources import read_resource
+    return read_resource("metaglens.templates", script_name)
 
 
 def copy_support_files(dest_dir: Path) -> None:
@@ -40,9 +38,8 @@ def copy_support_files(dest_dir: Path) -> None:
     utils = load_template("_pipeline_utils.sh")
     (dest_dir / "pipeline_utils.sh").write_text(utils, encoding="utf-8")
     try:
-        logo = resources.files("metaglens.templates").joinpath(
-            "report_logo.b64"
-        ).read_text(encoding="utf-8")
+        from ._resources import read_resource
+        logo = read_resource("metaglens.templates", "report_logo.b64")
         (dest_dir / "report_logo.b64").write_text(logo, encoding="utf-8")
     except Exception:
         pass  # report still renders with a text title if the logo is absent

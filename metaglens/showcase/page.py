@@ -16,9 +16,9 @@ from .jobs import DEMO_ROUTES, SHOWCASE_SCRIPT_STAGE
 
 def _load_logo_b64() -> str:
     try:
-        from importlib import resources
-        return resources.files("metaglens.templates").joinpath(
-            "report_logo.b64").read_text(encoding="utf-8").strip()
+        from ._resources import read_resource
+        return read_resource("metaglens.templates",
+                             "report_logo.b64").strip()
     except Exception:
         return ""
 
@@ -27,9 +27,9 @@ def _load_credit_b64() -> str:
     """The developer attribution banner (avatar + GitHub badge + name), kept
     as a packaged asset so the page stays fully self-contained."""
     try:
-        from importlib import resources
-        return resources.files("metaglens.templates").joinpath(
-            "credit_banner.b64").read_text(encoding="utf-8").strip()
+        from ._resources import read_resource
+        return read_resource("metaglens.templates",
+                             "credit_banner.b64").strip()
     except Exception:
         return ""
 

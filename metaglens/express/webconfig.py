@@ -22,7 +22,6 @@ import secrets
 import threading
 import typing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from importlib import resources
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -212,8 +211,9 @@ def api_required_dbs(params: Dict[str, str]) -> Dict[str, Any]:
 def _load_logo_b64() -> str:
     """Single logo asset shared with the report. Replace the asset to rebrand."""
     try:
-        return resources.files("metaglens.templates").joinpath(
-            "report_logo.b64").read_text(encoding="utf-8").strip()
+        from .._resources import read_resource
+        return read_resource("metaglens.templates",
+                             "report_logo.b64").strip()
     except Exception:
         return ""
 

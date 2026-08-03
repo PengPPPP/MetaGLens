@@ -179,10 +179,9 @@ def generate_report(results_dir: Path, logo_b64: str = "",
             logo_b64 = logo_path.read_text(encoding="utf-8").strip()
     if not logo_b64:
         try:
-            from importlib import resources
-            logo_b64 = resources.files("metaglens.templates").joinpath(
-                "report_logo.b64"
-            ).read_text(encoding="utf-8").strip()
+            from ._resources import read_resource
+            logo_b64 = read_resource(
+                "metaglens.templates", "report_logo.b64").strip()
         except Exception:
             logo_b64 = ""
 
