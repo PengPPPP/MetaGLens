@@ -9,11 +9,10 @@ quality-controlled reads → assembly → coverage → genome bins → quality-f
 and dereplicated MAGs → taxonomy → functional annotation → a self-contained
 interactive delivery report.
 
-MetaGLens is the software form of the MetaGLens skill bundle. Instead of an AI
-agent filling in shell templates, a deterministic command-line tool collects a
-project configuration, discovers paired samples, renders the bundled stage
-scripts into runnable Bash, and drives them to completion with resumable state
-tracking in `pipeline_status.json`.
+MetaGLens is a deterministic command-line tool: it collects a project
+configuration, discovers paired samples, renders the bundled stage scripts into
+runnable Bash, and drives them to completion with resumable state tracking in
+`pipeline_status.json`.
 
 The generated scripts are **standalone and inspectable** — you can read, edit,
 and run them without MetaGLens once they are materialized.
