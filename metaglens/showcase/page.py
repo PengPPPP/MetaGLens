@@ -114,13 +114,18 @@ header{padding:30px 34px 10px;align-items:flex-start;gap:26px;
 .headline .t{font-size:52px;line-height:1.05;letter-spacing:-.5px;
   color:var(--navy);}
 .headline .d{font-size:19px;margin-top:6px;color:var(--muted);}
-.langsw{margin-left:auto;align-self:center;display:flex;gap:6px;}
+.langsw{align-self:center;display:flex;gap:6px;}
+/* developer attribution — sits in the header next to the title */
+.credit{margin-left:auto;align-self:center;flex:none;}
+.credit-img{width:min(320px,24vw);height:auto;display:block;}
 .hero{max-width:1180px;margin:0 auto;padding:4px 34px 0;}
 .hero h1{font-size:30px;margin:10px 0 8px;color:var(--ink);font-weight:700;}
 @media(max-width:860px){
   header{flex-direction:column;align-items:center;text-align:center;padding:20px 18px 6px;}
   .logo{height:150px;margin:-18px 0;}
   .headline{text-align:center;} .headline .t{font-size:38px;}
+  .credit{margin:10px auto 0;}
+  .credit-img{width:min(300px,80vw);}
   .langsw{margin:8px auto 0;}
   .hero{padding:4px 18px 0;} .hero h1{font-size:24px;}
 }
@@ -141,11 +146,9 @@ header{padding:30px 34px 10px;align-items:flex-start;gap:26px;
 pre.script{background:#0d1b2a;color:#cfe0f6;padding:16px;border-radius:12px;overflow:auto;
   max-height:460px;font-family:monospace;font-size:12.5px;line-height:1.5;}
 .audit{display:flex;gap:14px;flex-wrap:wrap;}
-/* ---- developer attribution footer ---- */
+/* ---- footer note ---- */
 .site-foot{max-width:1180px;margin:36px auto 0;padding:20px 34px 30px;border-top:1px solid var(--line);}
-.credit{display:flex;align-items:center;}
-.credit-img{width:min(430px,86vw);height:auto;display:block;}
-.foot-note{margin-top:14px;color:var(--muted);font-size:12.5px;}
+.foot-note{color:var(--muted);font-size:12.5px;}
 @media(max-width:600px){.site-foot{padding:16px 18px 24px;}}
 .hist{display:flex;flex-direction:column;gap:12px;}
 .histrow{display:flex;gap:14px;align-items:flex-start;}
@@ -170,6 +173,9 @@ pre.script{background:#0d1b2a;color:#cfe0f6;padding:16px;border-radius:12px;over
   <img class="logo" id="logo" alt="MetaGLens"/>
   <div class="headline"><div class="t">MetaGLens</div>
   <div class="d">reads → MAGs, made reproducible</div></div>
+  <div class="credit">
+    <img id="credit-img" class="credit-img" alt="Developed by PengPPPP, Fudan University">
+  </div>
   <div class="langsw"><button class="btn" onclick="setLang('en')">EN</button>
   <button class="btn" onclick="setLang('zh')">中文</button></div>
 </header>
@@ -237,9 +243,6 @@ pre.script{background:#0d1b2a;color:#cfe0f6;padding:16px;border-radius:12px;over
   </div>
 </main>
 <footer class="site-foot">
-  <div class="credit">
-    <img id="credit-img" class="credit-img" alt="Developed by PengPPPP, Fudan University">
-  </div>
   <div class="foot-note" data-i18n="footer"></div>
 </footer>
 
