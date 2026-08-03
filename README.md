@@ -27,8 +27,12 @@ required:
   <img src="assets/demo.gif" alt="MetaGLens demo — configure, run, report" width="80%">
 </p>
 
+**Try the interactive demo:** <https://PengPPPP.github.io/MetaGLens/> — a
+self-contained page where you can configure a project, run the pipeline, switch
+between analysis routes, and probe the safety boundary.
+
 Run it yourself in seconds with `metaglens demo` (stub toolchain, no scientific
-output), or open the self-contained showcase page with `metaglens showcase`.
+output), or open the same showcase page locally with `metaglens showcase`.
 
 ## Install
 
