@@ -2,7 +2,7 @@
   <img src="assets/banner.png" alt="MetaGLens" width="100%">
 </p>
 
-# MetaGLens
+# MetaGLens: Reproducible metagenomics — from raw reads to MAGs
 
 Reproducible shotgun-metagenomics pipeline orchestrator: paired raw reads →
 quality-controlled reads → assembly → coverage → genome bins → quality-filtered
