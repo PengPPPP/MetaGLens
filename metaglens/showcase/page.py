@@ -23,6 +23,17 @@ def _load_logo_b64() -> str:
         return ""
 
 
+def _load_credit_b64() -> str:
+    """The developer attribution banner (avatar + GitHub badge + name), kept
+    as a packaged asset so the page stays fully self-contained."""
+    try:
+        from importlib import resources
+        return resources.files("metaglens.templates").joinpath(
+            "credit_banner.b64").read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
 def _audit_stats() -> list:
     """Real, current numbers only — never a stale hardcoded figure."""
     import subprocess
@@ -64,8 +75,11 @@ def build_page(static: bool = False, boot_extra: dict = None) -> str:
     from .attacks import run_canonical
     logo = _load_logo_b64()
     logo_src = f"data:image/png;base64,{logo}" if logo else ""
+    credit = _load_credit_b64()
+    credit_src = f"data:image/png;base64,{credit}" if credit else ""
     boot = {"routes": list(DEMO_ROUTES), "static": static,
             "scriptStage": SHOWCASE_SCRIPT_STAGE, "logo": logo_src,
+            "creditSrc": credit_src,
             # Real results of the boundary check, baked in for the static site.
             "attacks": run_canonical(),
             # Real, current project numbers (git + test file), not hardcoded.
@@ -127,6 +141,12 @@ header{padding:30px 34px 10px;align-items:flex-start;gap:26px;
 pre.script{background:#0d1b2a;color:#cfe0f6;padding:16px;border-radius:12px;overflow:auto;
   max-height:460px;font-family:monospace;font-size:12.5px;line-height:1.5;}
 .audit{display:flex;gap:14px;flex-wrap:wrap;}
+/* ---- developer attribution footer ---- */
+.site-foot{max-width:1180px;margin:36px auto 0;padding:20px 34px 30px;border-top:1px solid var(--line);}
+.credit{display:flex;align-items:center;}
+.credit-img{width:min(430px,86vw);height:auto;display:block;}
+.foot-note{margin-top:14px;color:var(--muted);font-size:12.5px;}
+@media(max-width:600px){.site-foot{padding:16px 18px 24px;}}
 .hist{display:flex;flex-direction:column;gap:12px;}
 .histrow{display:flex;gap:14px;align-items:flex-start;}
 .histnum{flex:none;width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;
@@ -216,7 +236,12 @@ pre.script{background:#0d1b2a;color:#cfe0f6;padding:16px;border-radius:12px;over
     <div class="flex" id="audit-stats"></div>
   </div>
 </main>
-<footer data-i18n="footer"></footer>
+<footer class="site-foot">
+  <div class="credit">
+    <img id="credit-img" class="credit-img" alt="Developed by PengPPPP, Fudan University">
+  </div>
+  <div class="foot-note" data-i18n="footer"></div>
+</footer>
 
 <script>var BOOT=/*__BOOT__*/;</script>
 <script>
@@ -290,6 +315,7 @@ var LANG="en";
 function t(k){return (I18N[LANG]&&I18N[LANG][k])||k;}
 function $(s){return document.querySelector(s);}
 if(BOOT.logo){$("#logo").src=BOOT.logo;}else{$("#logo").replaceWith(Object.assign(document.createElement("span"),{textContent:"MetaGLens",style:"font-size:30px;font-weight:700;color:var(--brand)"}));}
+if(BOOT.creditSrc){$("#credit-img").src=BOOT.creditSrc;}else{$("#credit-img").style.display="none";}
 
 // route select
 (function(){var sel=$("#f-route");BOOT.routes.forEach(function(r){var o=document.createElement("option");o.value=r;o.textContent=r;sel.appendChild(o);});
