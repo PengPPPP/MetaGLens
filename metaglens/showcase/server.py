@@ -224,7 +224,11 @@ def export_static(out_dir: str, route: str = "mag_per_sample") -> Path:
         # index.html as well (file:// forbids fetch() of sibling files).
         boot_extra: dict = {"routes": list(DEMO_ROUTES)}
         for rt in DEMO_ROUTES:
-            result = run_demo(rt, workdir=tmp)
+            # Each route needs its own working tree: run_demo writes a fixed
+            # layout under its workdir (work/metaglens_results/...), so sharing
+            # one tmp dir would let the second route read the first route's
+            # products — e.g. a contig-based report showing the MAG route's bins.
+            result = run_demo(rt, workdir=str(Path(tmp) / rt))
             report = result.get("report_html", "")
             monitor = result.get("monitor_html", "")
             if report and Path(report).is_file():

@@ -2966,6 +2966,31 @@ class TestShowcaseExport(unittest.TestCase):
         self.assertIn("--brand:#38A8F0", page)            # shared theme
         self.assertIn("NO scientific results", page)      # honesty line
 
+    @unittest.skipIf(shutil.which("bash") is None, "bash unavailable")
+    def test_dual_route_bake_does_not_cross_contaminate(self):
+        """Each baked route must come from its own working tree: the contig
+        route has no bins, so its report must not show the MAG route's MAGs.
+        Regression for the shared-tmpdir bug where the second run_demo read
+        the first route's products."""
+        import json, re
+        from metaglens.showcase import export_static
+        d = Path(tempfile.mkdtemp(prefix="mg_export2_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        export_static(str(d), route="mag_per_sample")
+        h = (d / "index.html").read_text(encoding="utf-8")
+        i = h.find("var BOOT=") + len("var BOOT=")
+        boot, _ = json.JSONDecoder().raw_decode(h[i:])
+        def payload(rt):
+            rep = boot.get(f"reportHtml_{rt}", "")
+            m = re.search(r'window\.__MG__\s*=\s*(\{.*?\});', rep, re.S)
+            return json.loads(m.group(1)) if m else {}
+        mag = payload("mag_per_sample")
+        contig = payload("contig_based")
+        self.assertGreater(len(mag.get("mags", [])), 0)     # MAG route has MAGs
+        self.assertEqual(len(contig.get("mags", [])), 0)    # contig route has none
+        self.assertNotEqual(boot["reportHtml_mag_per_sample"],
+                            boot["reportHtml_contig_based"])
+
 
 class TestShowcaseAttackPanel(unittest.TestCase):
     """Phase 18: the attack panel is backed by the real repair boundary check."""
