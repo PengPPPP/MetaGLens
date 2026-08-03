@@ -81,31 +81,31 @@ _stub("megahit", r'''
 OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version) echo "MEGAHIT v0.0.0-stub"; exit 0;;
+    --version) echo "MEGAHIT v1.2.9-stub"; exit 0;;
     -o) OUT="$2"; shift 2;;
     *) shift;;
   esac
 done
 [[ -n "$OUT" ]] || exit 1
 mkdir -p "$OUT"
-printf '%b' "__FASTA__" > "$OUT/final.contigs.fa"
+python3 "$MG_STUBDATA" contigs "$OUT/final.contigs.fa" 48
 exit 0
-'''.replace("__FASTA__", _FASTA_BODY))
+''')
 
 _stub("metaspades.py", r'''
 OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version) echo "SPAdes v0.0.0-stub"; exit 0;;
+    --version) echo "SPAdes v3.15-stub"; exit 0;;
     -o) OUT="$2"; shift 2;;
     *) shift;;
   esac
 done
 [[ -n "$OUT" ]] || exit 1
 mkdir -p "$OUT"
-printf '%b' "__FASTA__" > "$OUT/contigs.fasta"
+python3 "$MG_STUBDATA" contigs "$OUT/contigs.fasta" 48
 exit 0
-'''.replace("__FASTA__", _FASTA_BODY))
+''')
 
 _stub("seqkit", r'''
 SUB="${1:-}"
@@ -263,7 +263,7 @@ case "$SUB" in
   coverage)
     # mag_abundance aggregates per-contig meandepth from this table, so the
     # reference names must be the real ones: read them back from the @SQ lines
-    # the aligner stub wrote into this "BAM".
+    # the aligner stub wrote into this "BAM", and give each MAG a varied depth.
     BAM=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -271,11 +271,12 @@ case "$SUB" in
         *) BAM="$1"; shift;;
       esac
     done
-    printf '#rname\tstartpos\tendpos\tnumreads\tcovbases\tcoverage\tmeandepth\tmeanbaseq\tmeanmapq\n'
     if [[ -n "$BAM" && -f "$BAM" ]]; then
-      grep '^@SQ' "$BAM" 2>/dev/null | sed 's/.*SN:\([^\t]*\).*/\1/' | while read -r r; do
-        [[ -n "$r" ]] && printf '%s\t1\t2000\t10\t1800\t90.0\t12.5\t35.0\t42.0\n' "$r"
-      done
+      SAMPLE="$(basename "$BAM")"; SAMPLE="${SAMPLE%%.*}"
+      grep '^@SQ' "$BAM" 2>/dev/null | sed 's/.*SN:\([^\t]*\).*/\1/' \
+        | python3 "$MG_STUBDATA" coverage /dev/stdout "$SAMPLE"
+    else
+      printf '#rname\tstartpos\tendpos\tnumreads\tcovbases\tcoverage\tmeandepth\tmeanbaseq\tmeanmapq\n'
     fi
     ;;
   faidx) ;;
@@ -313,33 +314,47 @@ exit 0
 # 04 binning
 # --------------------------------------------------------------------------- #
 _stub("metabat2", r'''
-OUT=""
+IN=""; OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) echo "MetaBAT 2 (version 2.15-stub)"; exit 0;;
+    -i) IN="$2"; shift 2;;
     -o) OUT="$2"; shift 2;;
     *) shift;;
   esac
 done
 [[ -n "$OUT" ]] || exit 1
 mkdir -p "$(dirname "$OUT")"
-printf '%b' ">contig_1 len=2000\nACGTACGTACACGTACGTAC\n" > "${OUT}.1.fa"
-printf '%b' ">contig_2 len=1500\nTTGACCAGTTTTGACCAGTT\n" > "${OUT}.2.fa"
+if [[ -n "$IN" && -f "$IN" ]]; then
+  python3 "$MG_STUBDATA" partition "$IN" "$OUT" 12
+else
+  printf '%b' ">contig_1 len=2000\nACGTACGTACACGTACGTAC\n" > "${OUT}.1.fa"
+fi
 exit 0
 ''')
 
 _stub("run_MaxBin.pl", r'''
-OUT=""
+IN=""; OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -version|-v) echo "MaxBin 2.2.7-stub"; exit 0;;
+    -contig) IN="$2"; shift 2;;
     -out) OUT="$2"; shift 2;;
     *) shift;;
   esac
 done
 [[ -n "$OUT" ]] || exit 1
 mkdir -p "$(dirname "$OUT")"
-printf '%b' ">contig_1 len=2000\nACGTACGTACACGTACGTAC\n" > "${OUT}.001.fasta"
+if [[ -n "$IN" && -f "$IN" ]]; then
+  python3 "$MG_STUBDATA" partition "$IN" "${OUT}.tmp" 12
+  for f in "${OUT}.tmp".*.fa; do
+    [[ -e "$f" ]] || continue
+    n="${f##*.tmp.}"; n="${n%.fa}"
+    mv "$f" "${OUT}.$(printf '%03d' "$n").fasta"
+  done
+else
+  printf '%b' ">contig_1 len=2000\nACGTACGTACACGTACGTAC\n" > "${OUT}.001.fasta"
+fi
 exit 0
 ''')
 
@@ -419,19 +434,24 @@ exit 0
 ''')
 
 _stub("DAS_Tool", r'''
-OUT=""
+OUT=""; CONTIGS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) echo "DAS Tool 1.1.6-stub"; exit 0;;
     -o) OUT="$2"; shift 2;;
+    -c) CONTIGS="$2"; shift 2;;
     *) shift;;
   esac
 done
 [[ -n "$OUT" ]] || exit 1
 BINS="${OUT}_DASTool_bins"
 mkdir -p "$BINS"
-printf '%b' ">contig_1 len=2000\nACGTACGTACACGTACGTAC\n" > "${BINS}/das_bin_1.fa"
-printf '%b' ">contig_2 len=1500\nTTGACCAGTTTTGACCAGTT\n" > "${BINS}/das_bin_2.fa"
+if [[ -n "$CONTIGS" && -f "$CONTIGS" ]]; then
+  python3 "$MG_STUBDATA" partition "$CONTIGS" "${BINS}/das_bin" 12
+else
+  printf '%b' ">contig_1 len=2000\nACGTACGTACACGTACGTAC\n" > "${BINS}/das_bin_1.fa"
+  printf '%b' ">contig_2 len=1500\nTTGACCAGTTTTGACCAGTT\n" > "${BINS}/das_bin_2.fa"
+fi
 exit 0
 ''')
 
@@ -453,16 +473,7 @@ done
 [[ "$SUB" == "predict" ]] || exit 0
 [[ -n "$OUT" ]] || exit 1
 mkdir -p "$OUT"
-{
-  printf 'Name\tCompleteness\tContamination\tCompleteness_Model_Used\n'
-  shopt -s nullglob
-  found=0
-  for f in "${IN%/}"/*."${EXT}"; do
-    printf '%s\t95.5\t2.1\tstub\n' "$(basename "${f%.*}")"
-    found=1
-  done
-  [[ "$found" == "0" ]] && printf 'stub_bin\t95.5\t2.1\tstub\n'
-} > "${OUT%/}/quality_report.tsv"
+python3 "$MG_STUBDATA" checkm "${IN%/}" "$EXT" "${OUT%/}/quality_report.tsv"
 exit 0
 ''')
 
@@ -494,7 +505,7 @@ exit 0
 ''')
 
 _stub("gtdbtk", r'''
-if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then echo "gtdbtk 0.0.0-stub"; exit 0; fi
+if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then echo "gtdbtk 2.4-stub"; exit 0; fi
 SUB="${1:-}"; shift || true
 OUT=""; GDIR=""; EXT="fa"
 while [[ $# -gt 0 ]]; do
@@ -507,16 +518,7 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$OUT" ]] || exit 1
 mkdir -p "$OUT"
-{
-  printf 'user_genome\tclassification\tfastani_reference\n'
-  shopt -s nullglob
-  found=0
-  for f in "${GDIR%/}"/*."${EXT}"; do
-    printf '%s\td__Bacteria;p__Firmicutes;c__Bacilli;o__Bacillales;f__Bacillaceae;g__Bacillus;s__Bacillus subtilis\tGCF_stub\n' "$(basename "${f%.*}")"
-    found=1
-  done
-  [[ "$found" == "0" ]] && printf 'stub_mag\td__Bacteria;p__Firmicutes;c__Bacilli;o__Bacillales;f__Bacillaceae;g__Bacillus;s__Bacillus subtilis\tGCF_stub\n'
-} > "${OUT%/}/gtdbtk.bac120.summary.tsv"
+python3 "$MG_STUBDATA" gtdbtk "${GDIR%/}" "$EXT" "${OUT%/}/gtdbtk.bac120.summary.tsv"
 exit 0
 ''')
 
@@ -600,18 +602,13 @@ if [[ -n "$OUT" ]]; then
 fi
 if [[ -n "$REP" ]]; then
   mkdir -p "$(dirname "$REP")"
-  # pct, clade reads, taxon reads, rank code, taxid, name
-  {
-    printf '55.00\t55\t0\tD\t2\tBacteria\n'
-    printf '35.00\t35\t35\tS\t1423\tBacillus subtilis\n'
-    printf '20.00\t20\t20\tS\t1280\tStaphylococcus aureus\n'
-  } > "$REP"
+  python3 "$MG_STUBDATA" kraken_report "$REP"
 fi
 exit 0
 ''')
 
 _stub("bracken", r'''
-if [[ "${1:-}" == "-v" ]]; then echo "Bracken 0.0.0-stub"; exit 0; fi
+if [[ "${1:-}" == "-v" ]]; then echo "Bracken 2.9-stub"; exit 0; fi
 OUT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -621,29 +618,36 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ -n "$OUT" ]]; then
-  {
-    printf 'name\ttaxonomy_id\ttaxonomy_lvl\tkraken_assigned_reads\tadded_reads\tnew_est_reads\tfraction_total_reads\n'
-    printf 'Bacillus subtilis\t1423\tS\t35\t5\t40\t0.6000\n'
-    printf 'Staphylococcus aureus\t1280\tS\t20\t0\t20\t0.4000\n'
-  } > "$OUT"
+  python3 "$MG_STUBDATA" bracken "$OUT"
 fi
 exit 0
 ''')
 
 
 def install_stubs(bin_dir: Path) -> Path:
-    """Write every stub as an executable into ``bin_dir``. Returns the path."""
+    """Write every stub as an executable into ``bin_dir``. Returns the path.
+
+    Also installs the deterministic data generator as ``_mg_stubdata.py`` so the
+    stubs can call ``python3 "$MG_STUBDATA" <command>`` to emit realistic data.
+    """
     bin_dir = Path(bin_dir)
     bin_dir.mkdir(parents=True, exist_ok=True)
     for name, body in STUBS.items():
         target = bin_dir / name
         target.write_text(body, encoding="utf-8")
         target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    # Ship the data generator next to the stubs.
+    import importlib.util
+    spec = importlib.util.find_spec("metaglens.demo.stubdata")
+    if spec is not None and spec.origin:
+        src = Path(spec.origin).read_text(encoding="utf-8")
+        (bin_dir / "_mg_stubdata.py").write_text(src, encoding="utf-8")
     return bin_dir
 
 
 def stub_env(bin_dir: Path, base_env: Dict[str, str] = None) -> Dict[str, str]:
-    """Environment with the stub directory first on PATH."""
+    """Environment with the stub directory first on PATH and MG_STUBDATA set."""
     env = dict(base_env if base_env is not None else os.environ)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env["MG_STUBDATA"] = str(Path(bin_dir) / "_mg_stubdata.py")
     return env
