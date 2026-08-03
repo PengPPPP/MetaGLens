@@ -3085,5 +3085,83 @@ class TestShowcaseAttackEndpoint(unittest.TestCase):
         self.assertTrue(body["refused"])   # non-whitelisted op
 
 
+class TestStubDataRealism(unittest.TestCase):
+    """Phase 18 (B): the stub data is realistic, varied, and deterministic."""
+
+    def test_generators_are_deterministic(self):
+        from metaglens.demo import stubdata as sd
+        import tempfile, os
+        d1, d2 = tempfile.mkdtemp(), tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d1, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, d2, ignore_errors=True)
+        for d in (d1, d2):
+            sd.gen_contigs(os.path.join(d, "c.fa"), 20)
+            sd.gen_gtdbtk(d, "fa", os.path.join(d, "g.tsv"))
+        a = open(os.path.join(d1, "g.tsv")).read()
+        b = open(os.path.join(d2, "g.tsv")).read()
+        self.assertEqual(a, b, "generator output must be reproducible")
+
+    def test_species_assignment_is_stable(self):
+        from metaglens.demo import stubdata as sd
+        # Same name always maps to the same species, independent of order.
+        self.assertEqual(sd.species_for("MAG_1"), sd.species_for("MAG_1"))
+        # The community spans the advertised genera.
+        genera = set()
+        for i in range(40):
+            _sp, lin, _w = sd.species_for(f"demo_bin{i}")
+            genera.add(lin.split(";")[-2])   # g__ rank
+        self.assertGreaterEqual(len(genera), 5)
+
+    def test_checkm_quality_varies(self):
+        from metaglens.demo import stubdata as sd
+        import tempfile, os
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        for i in range(10):
+            open(os.path.join(d, f"bin{i}.fa"), "w").write(">c\nACGT\n")
+        out = os.path.join(d, "q.tsv")
+        sd.gen_checkm(d, "fa", out)
+        rows = [l.split("\t") for l in open(out)][1:]
+        self.assertEqual(len(rows), 10)
+        comps = {r[1] for r in rows}
+        conts = {r[2] for r in rows}
+        self.assertGreater(len(comps), 1, "completeness must vary")
+        self.assertGreater(len(conts), 1, "contamination must vary")
+        for r in rows:
+            self.assertTrue(50.0 <= float(r[1]) <= 99.0)
+            self.assertTrue(0.5 <= float(r[2]) <= 8.0)
+
+    def test_coverage_varies_per_sample(self):
+        from metaglens.demo import stubdata as sd
+        import tempfile, os
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        rnames = ["MAG_1|contig_1", "MAG_2|contig_2"]
+        o1, o2 = os.path.join(d, "a.tsv"), os.path.join(d, "b.tsv")
+        sd.gen_coverage(rnames, o1, "sampleA")
+        sd.gen_coverage(rnames, o2, "sampleB")
+        d1 = [l.split("\t")[6] for l in open(o1)][1:]
+        d2 = [l.split("\t")[6] for l in open(o2)][1:]
+        self.assertNotEqual(d1, d2, "per-sample abundance must differ")
+
+    def test_kraken_report_has_multiple_species(self):
+        from metaglens.demo import stubdata as sd
+        import tempfile, os
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        out = os.path.join(d, "r.txt")
+        sd.gen_kraken_report(out)
+        species = [l.split("\t")[5] for l in open(out) if "\tS\t" in l]
+        self.assertGreaterEqual(len(species), 8)
+
+    def test_demo_community_matrix_is_multitaxon(self):
+        """End to end: the mag-route community table is not a single taxon."""
+        from metaglens.demo import run_demo
+        d = Path(tempfile.mkdtemp(prefix="mg_realism_"))
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        r = run_demo("mag_per_sample", workdir=str(d))
+        self.assertTrue(r["ok"], r["errors"])
+        matrix = (d / "work" / "metaglens_results" / "10_community"
+                  / "community_matrix.tsv").read_text().splitlines()
+        self.assertGreaterEqual(len(matrix) - 1, 5, "expected a multi-taxon community")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
