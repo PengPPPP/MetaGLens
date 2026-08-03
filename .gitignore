@@ -40,3 +40,6 @@ preview/
 # README 源素材(压缩版在 assets/,原始文件不进仓库)
 /MetaGLens-software演示动图-单片尾循环版.gif
 /MetaGLens横幅.png
+
+# 署名源图(已以 base64 打包进 metaglens/templates/credit_banner.b64)
+/Developed by PengPPPP - Fudan University.png
