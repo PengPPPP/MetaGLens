@@ -36,10 +36,11 @@ _MAX_BODY = 4096                            # a run request is tiny
 class _ShowcaseServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, addr, handler, *, manager: JobManager) -> None:
+    def __init__(self, addr, handler, *, manager: JobManager,
+                 audience: str = "judge") -> None:
         super().__init__(addr, handler)
         self.manager = manager
-        self.page_html = build_page(static=False).encode("utf-8")
+        self.page_html = build_page(static=False, audience=audience).encode("utf-8")
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -162,17 +163,18 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def build_app(manager: Optional[JobManager] = None, host: str = "127.0.0.1",
-              port: int = 0) -> _ShowcaseServer:
+              port: int = 0, audience: str = "judge") -> _ShowcaseServer:
     """Construct the server bound to (host, port). Port 0 lets the OS choose."""
     manager = manager or JobManager()
-    return _ShowcaseServer((host, port), _Handler, manager=manager)
+    return _ShowcaseServer((host, port), _Handler, manager=manager,
+                           audience=audience)
 
 
 def serve(host: str = "0.0.0.0", port: int = 8080,
-          open_browser: bool = False) -> None:
+          open_browser: bool = False, audience: str = "judge") -> None:
     """Run the showcase server (blocking). Ctrl-C stops it."""
     manager = JobManager()
-    server = build_app(manager=manager, host=host, port=port)
+    server = build_app(manager=manager, host=host, port=port, audience=audience)
     actual_port = server.server_address[1]
     shown_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{shown_host}:{actual_port}/"
@@ -200,7 +202,8 @@ def serve(host: str = "0.0.0.0", port: int = 8080,
         manager.shutdown()
 
 
-def export_static(out_dir: str, route: str = "mag_per_sample") -> Path:
+def export_static(out_dir: str, route: str = "mag_per_sample",
+                  audience: str = "judge") -> Path:
     """Export a backend-free static site: one pre-run demo baked in.
 
     Produces index.html (static mode), report.html, monitor.html and script.txt,
@@ -257,7 +260,7 @@ def export_static(out_dir: str, route: str = "mag_per_sample") -> Path:
         boot_extra["scriptName"] = script_name
 
         (out / "index.html").write_text(
-            build_page(static=True, boot_extra=boot_extra),
+            build_page(static=True, boot_extra=boot_extra, audience=audience),
             encoding="utf-8",
         )
     finally:

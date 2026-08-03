@@ -2966,6 +2966,29 @@ class TestShowcaseExport(unittest.TestCase):
         self.assertIn("--brand:#38A8F0", page)            # shared theme
         self.assertIn("NO scientific results", page)      # honesty line
 
+    def test_user_audience_has_no_ai_mentions(self):
+        """The user-facing variant must not say the software was made by AI:
+        no 'AI'/'agent'/'skill' anywhere in either language's copy, and the
+        audit stats must not carry the 'AI agents' row. The judge variant
+        keeps the AI-Coding story."""
+        import json, re
+        from metaglens.showcase.page import build_page
+        user = build_page(static=True, audience="user")
+        judge = build_page(static=True)                     # default = judge
+        def i18n(page):
+            m = re.search(r"var I18N=(\{.*?\});\nvar LANG", page, re.S)
+            return json.loads(m.group(1))
+        u = i18n(user)
+        for lang in ("en", "zh"):
+            blob = " ".join(str(v) for v in u[lang].values())
+            self.assertNotRegex(blob, r"\b(AI|agent|skill)\b",
+                                f"user/{lang} must not mention AI/agent/skill")
+        boot = re.search(r"var BOOT=(\{.*?\});", user, re.S)
+        b = json.loads(boot.group(1).replace("<\\/", "</"))
+        self.assertNotIn("AI agents", [s[0] for s in b["audit"]])
+        self.assertIn("NO scientific results", user)        # honesty stays
+        self.assertIn("AI Coding", i18n(judge)["en"]["histH"])  # judge keeps story
+
     @unittest.skipIf(shutil.which("bash") is None, "bash unavailable")
     def test_dual_route_bake_does_not_cross_contaminate(self):
         """Each baked route must come from its own working tree: the contig

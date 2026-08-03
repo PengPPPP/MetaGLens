@@ -11,6 +11,10 @@
 
 **我们的 `submission/site/index.html` 是完全自包含的**(报告和脚本已内嵌,含 mag/contig 双路线切换),**单独上传这一个文件即可完整演示**;其余文件供评委直接打开查看。
 
+> **两种版本**:`submission/site/` 是参赛版(讲 AI Coding 协作开发的故事);
+> `submission/site-user/` 是面向用户的版本(不提及任何 AI/skill/agent,
+> 只讲产品本身)。给课题组成员/普通用户看用后者。
+
 ### 步骤
 
 1. 打开 <https://modelscope.cn/studios> → 「创建创空间」;

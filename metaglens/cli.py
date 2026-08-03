@@ -1358,13 +1358,15 @@ def showcase(
                                          help="Write a backend-free static site to DIR and exit."),
     route: str = typer.Option("mag_per_sample", "--route",
                               help="Route used for the export's pre-baked run."),
+    audience: str = typer.Option("judge", "--audience",
+                                 help="Copy variant: 'judge' (competition story) or 'user' (no AI mentions)."),
 ) -> None:
     """Serve the one-page demo site (stub tools; no scientific output)."""
     from metaglens.showcase import serve as showcase_serve, export_static
     if export:
         _section("Static showcase export")
         console.print("[dim]Pre-running a stub demo and baking the site...[/dim]")
-        out = export_static(export, route=route)
+        out = export_static(export, route=route, audience=audience)
         _success(f"Static site written to {out} (open {out}/index.html).")
         console.print("[dim]Stub tools — no scientific results.[/dim]")
         return
@@ -1372,7 +1374,8 @@ def showcase(
     _section("Showcase")
     console.print("[dim]Demo uses stub tools and produces NO scientific "
                   "results — it exercises the real control flow only.[/dim]")
-    showcase_serve(host=host, port=port, open_browser=open_browser)
+    showcase_serve(host=host, port=port, open_browser=open_browser,
+                   audience=audience)
 
 
 # ─── setup-env ───────────────────────────────────────────────────────────────

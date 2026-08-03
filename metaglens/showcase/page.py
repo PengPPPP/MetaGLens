@@ -34,7 +34,7 @@ def _load_credit_b64() -> str:
         return ""
 
 
-def _audit_stats() -> list:
+def _audit_stats(audience: str = "judge") -> list:
     """Real, current numbers only — never a stale hardcoded figure."""
     import subprocess
     from pathlib import Path
@@ -62,28 +62,36 @@ def _audit_stats() -> list:
         pass
 
     stats.append(["stages", "12"])       # fixed, real
-    stats.append(["AI agents", "2"])     # fixed, real
+    if audience == "user":
+        stats.append(["shell lines", "~4000"])   # fixed, real; no AI mention
+    else:
+        stats.append(["AI agents", "2"])          # fixed, real
     return stats
 
 
-def build_page(static: bool = False, boot_extra: dict = None) -> str:
+def build_page(static: bool = False, boot_extra: dict = None,
+               audience: str = "judge") -> str:
     """Return the self-contained showcase page.
 
     ``static`` marks an exported, backend-free build so the JS can fall back to
     pre-baked artefacts instead of calling the run API.
+    ``audience`` selects the copy: "judge" tells the AI-Coding competition
+    story, "user" is the user-facing variant without any AI/skill/agent/
+    competition mentions.
     """
     from .attacks import run_canonical
     logo = _load_logo_b64()
     logo_src = f"data:image/png;base64,{logo}" if logo else ""
     credit = _load_credit_b64()
     credit_src = f"data:image/png;base64,{credit}" if credit else ""
+    i18n = _I18N_JUDGE if audience == "judge" else _I18N_USER
     boot = {"routes": list(DEMO_ROUTES), "static": static,
             "scriptStage": SHOWCASE_SCRIPT_STAGE, "logo": logo_src,
             "creditSrc": credit_src,
             # Real results of the boundary check, baked in for the static site.
             "attacks": run_canonical(),
             # Real, current project numbers (git + test file), not hardcoded.
-            "audit": _audit_stats()}
+            "audit": _audit_stats(audience)}
     if boot_extra:
         boot.update(boot_extra)
     # The payload can carry whole HTML documents (the exported report), and a
@@ -95,9 +103,155 @@ def build_page(static: bool = False, boot_extra: dict = None) -> str:
         _TEMPLATE
         .replace("/*__CSS__*/", REPORT_CSS)
         .replace("<!--__LENS__-->", LENS_SVG)
+        .replace("/*__I18N__*/", json.dumps(i18n, ensure_ascii=False))
         .replace("/*__BOOT__*/", boot_json)
     )
 
+
+# Judge-facing copy: tells the AI-Coding competition story (the demo page is a
+# competition entry). User-facing copy (audience="user") drops every AI/skill/
+# agent/competition mention — users care about the software, not how it was made.
+_I18N_JUDGE = {
+    "en": {
+        "title": "See it run in your browser",
+        "lead": "MetaGLens turns raw metagenomic reads into genomes, taxonomy and a self-contained report — as standalone, inspectable Bash you can run without MetaGLens. Below, the real 12-stage pipeline runs end to end in seconds.",
+        "honestyTag": "Demo note",
+        "honesty": "This demo uses stub tools and produces NO scientific results. What runs is the real control flow, state machine, product validation and report generator — only the slow bioinformatics tools are stubbed. That is exactly what proves the generated scripts are standalone.",
+        "nav": ["Why", "History", "Configure", "Run", "Report", "Script", "Attack", "Audit"],
+        "whyH": "Why it exists",
+        "whyP": "Lab servers often forbid installing metered AI agents. MetaGLens is the deterministic answer: no API key, no outbound calls during analysis, no per-use cost — just Bash you own.",
+        "histH": "How AI Coding built this",
+        "histP": "An AI-Science idea, turned by AI Coding into software that needs no AI to run.",
+        "hist1b": "AI for Science",
+        "hist1": "It began with a bundle of 9 skills we built ourselves, letting an AI agent orchestrate the metagenomics workflow — filling in shell templates stage by stage.",
+        "hist2b": "AI Coding",
+        "hist2": "AI then distilled that agent behaviour into deterministic software: a CLI plus ~4000 lines of Bash, with the reasoning captured as readable rules. This is the competition entry.",
+        "hist3b": "No AI left in the product",
+        "hist3": "At runtime there is zero AI: no key, no model call, no outbound network. That is a deliberate design principle for locked-down lab servers — a feature, not a gap.",
+        "cfgH": "1 · Configure",
+        "cfgP": "Pick a route. On the full tool it discovers samples, checks hardware and databases, and writes a shareable metaglens.yaml.",
+        "cfgProject": "Project", "cfgRoute": "Route",
+        "runH": "2 · Run",
+        "runP": "Click run. The real stage scripts execute against a stub toolchain and finish in seconds.",
+        "runBtn": "Run the pipeline",
+        "repH": "3 · Report",
+        "repP": "A self-contained HTML report, generated from this run's outputs.",
+        "scrH": "4 · Read the script",
+        "scrP": "The rendered Bash for one stage. This is what MetaGLens delivers — readable, auditable, runnable without it.",
+        "scrWait": "(run the pipeline to see a generated script)",
+        "atkH": "5 · Try to break it",
+        "atkP": "MetaGLens can auto-repair a failed stage, but only resource changes — never scientific parameters. Click a probe and watch the real safety check refuse it. These call the same code the pipeline uses.",
+        "atkWait": "Click a probe above to see the real verdict.",
+        "audH": "Built and reviewed by two AI agents",
+        "audP": "Two agents developed this in tandem and independently reviewed each other, with a full WORKLOG and git trail.",
+        "footer": "MetaGLens · deterministic shotgun-metagenomics · demo uses stub tools, no scientific output",
+    },
+    "zh": {
+        "title": "在浏览器里看它跑起来",
+        "lead": "MetaGLens 把宏基因组原始 reads 变成基因组、物种分类和一份自包含报告——产物是可独立运行、可审计的 Bash 脚本,不依赖 MetaGLens 本身。下面这条真实的 12 阶段流程会在几秒内端到端跑完。",
+        "honestyTag": "演示说明",
+        "honesty": "本演示使用桩工具,不产生任何科学结果。真正运行的是完整的控制流、状态机、产物验证与报告生成器,只把耗时的生信工具换成了桩——这恰好证明了生成的脚本可以独立运行。",
+        "nav": ["为什么", "历程", "配置", "运行", "报告", "脚本", "攻击", "审计"],
+        "whyH": "为什么需要它",
+        "whyP": "实验室服务器常常不允许安装计费型 AI agent。MetaGLens 是确定性的答案:零密钥、分析期间零外呼、零按次计费——只有你自己拥有的 Bash。",
+        "histH": "AI Coding 如何造出它",
+        "histP": "一个 AI for Science 的想法,被 AI Coding 变成了运行时不需要 AI 的软件。",
+        "hist1b": "AI for Science",
+        "hist1": "起点是我们自己做的 9 个 skill 组成的技能包,让 AI agent 编排整条宏基因组流程——逐阶段填充 shell 模板。",
+        "hist2b": "AI Coding",
+        "hist2": "随后 AI 把这套 agent 行为蒸馏成确定性软件:一个 CLI 加约 4000 行 Bash,把推理沉淀为可读的规则。这才是参赛作品。",
+        "hist3b": "产品里不留 AI",
+        "hist3": "运行时零 AI:无密钥、无模型调用、无对外网络。这是面向封闭实验室服务器的刻意设计原则——是特性,不是缺陷。",
+        "cfgH": "1 · 配置",
+        "cfgP": "选择一条分析路线。在完整工具上它会发现样本、检查硬件与数据库,并写出可分享的 metaglens.yaml。",
+        "cfgProject": "项目", "cfgRoute": "路线",
+        "runH": "2 · 运行",
+        "runP": "点击运行。真实的阶段脚本对着桩工具链执行,几秒内完成。",
+        "runBtn": "运行流程",
+        "repH": "3 · 报告",
+        "repP": "一份自包含的 HTML 报告,由本次运行的产物生成。",
+        "scrH": "4 · 阅读脚本",
+        "scrP": "某个阶段渲染出的 Bash。这就是 MetaGLens 的交付物——可读、可审计、脱离它也能运行。",
+        "scrWait": "(运行流程后即可看到生成的脚本)",
+        "atkH": "5 · 试着攻破它",
+        "atkP": "MetaGLens 能自动修复失败的阶段,但只改资源参数——绝不动科学参数。点击下面的探针,看真实的安全检查当场拒绝它。这些调用的是流程本身用的同一段代码。",
+        "atkWait": "点击上方任一探针,查看真实判定结果。",
+        "audH": "由两个 AI agent 协作开发并互审",
+        "audP": "两个 agent 并行开发、互相独立审查,全程留有 WORKLOG 与 git 审计轨迹。",
+        "footer": "MetaGLens · 确定性宏基因组流程 · 演示使用桩工具,不产生科学结果",
+    },
+}
+
+_I18N_USER = {
+    "en": {
+        "title": "See it run in your browser",
+        "lead": "MetaGLens turns raw metagenomic reads into genomes, taxonomy and a self-contained report — as standalone, inspectable Bash you can run without MetaGLens. Below, the real 12-stage pipeline runs end to end in seconds.",
+        "honestyTag": "Demo note",
+        "honesty": "This demo uses stub tools and produces NO scientific results. What runs is the real control flow, state machine, product validation and report generator — only the slow bioinformatics tools are stubbed. That is exactly what proves the generated scripts are standalone.",
+        "nav": ["Why", "How it works", "Configure", "Run", "Report", "Script", "Safety", "Audit"],
+        "whyH": "Why it exists",
+        "whyP": "Lab servers are shared and often locked down. MetaGLens fits there by design: no API key, no outbound calls during analysis, no per-use cost — just Bash you own and can audit.",
+        "histH": "How it was built",
+        "histP": "Nine workflow recipes for shotgun metagenomics, distilled into deterministic software that runs with no keys and no network access.",
+        "hist1b": "The recipes",
+        "hist1": "It began with a bundle of 9 workflow recipes we wrote ourselves — each a tested recipe for one stage of the shotgun-metagenomics pipeline, from raw reads to MAGs.",
+        "hist2b": "From recipes to software",
+        "hist2": "Those recipes were distilled into deterministic software: a CLI plus ~4000 lines of auditable Bash, with every decision captured as readable rules.",
+        "hist3b": "Runs anywhere",
+        "hist3": "At runtime there are no model calls and no outbound network — a deliberate design for locked-down lab servers. Install once, run offline.",
+        "cfgH": "1 · Configure",
+        "cfgP": "Pick a route. On the full tool it discovers samples, checks hardware and databases, and writes a shareable metaglens.yaml.",
+        "cfgProject": "Project", "cfgRoute": "Route",
+        "runH": "2 · Run",
+        "runP": "Click run. The real stage scripts execute against a stub toolchain and finish in seconds.",
+        "runBtn": "Run the pipeline",
+        "repH": "3 · Report",
+        "repP": "A self-contained HTML report, generated from this run's outputs.",
+        "scrH": "4 · Read the script",
+        "scrP": "The rendered Bash for one stage. This is what MetaGLens delivers — readable, auditable, runnable without it.",
+        "scrWait": "(run the pipeline to see a generated script)",
+        "atkH": "5 · The safety boundary",
+        "atkP": "MetaGLens can auto-repair a failed stage, but only resource changes — never scientific parameters. Click a probe and watch the real safety check refuse it. These call the same code the pipeline uses.",
+        "atkWait": "Click a probe above to see the real verdict.",
+        "audH": "Deterministic, tested, auditable",
+        "audP": "Every stage is validated against its products, the suite holds hundreds of tests, and the generated Bash is readable and standalone — nothing hidden.",
+        "footer": "MetaGLens · deterministic shotgun-metagenomics · demo uses stub tools, no scientific output",
+    },
+    "zh": {
+        "title": "在浏览器里看它跑起来",
+        "lead": "MetaGLens 把宏基因组原始 reads 变成基因组、物种分类和一份自包含报告——产物是可独立运行、可审计的 Bash 脚本,不依赖 MetaGLens 本身。下面这条真实的 12 阶段流程会在几秒内端到端跑完。",
+        "honestyTag": "演示说明",
+        "honesty": "本演示使用桩工具,不产生任何科学结果。真正运行的是完整的控制流、状态机、产物验证与报告生成器,只把耗时的生信工具换成了桩——这恰好证明了生成的脚本可以独立运行。",
+        "nav": ["为什么", "如何诞生", "配置", "运行", "报告", "脚本", "安全", "审计"],
+        "whyH": "为什么需要它",
+        "whyP": "实验室服务器常常是共享且受限的。MetaGLens 天生适合这种环境:无密钥、分析期间无外呼、无按次计费——只有你自己拥有、可以审计的 Bash。",
+        "histH": "它是怎么来的",
+        "histP": "九套宏基因组流程配方,蒸馏成无需密钥、无需联网的确定性软件。",
+        "hist1b": "配方",
+        "hist1": "起点是我们自己写的 9 套工作流配方——每套都是宏基因组流程一个阶段的成熟配方,从原始 reads 到 MAG。",
+        "hist2b": "从配方到软件",
+        "hist2": "这些配方被蒸馏成确定性软件:一个 CLI 加约 4000 行可审计的 Bash,每一步决策都沉淀为可读的规则。",
+        "hist3b": "随处可跑",
+        "hist3": "运行时无模型调用、无对外网络——这是面向封闭实验室服务器的刻意设计。装一次,离线跑。",
+        "cfgH": "1 · 配置",
+        "cfgP": "选择一条分析路线。在完整工具上它会发现样本、检查硬件与数据库,并写出可分享的 metaglens.yaml。",
+        "cfgProject": "项目", "cfgRoute": "路线",
+        "runH": "2 · 运行",
+        "runP": "点击运行。真实的阶段脚本对着桩工具链执行,几秒内完成。",
+        "runBtn": "运行流程",
+        "repH": "3 · 报告",
+        "repP": "一份自包含的 HTML 报告,由本次运行的产物生成。",
+        "scrH": "4 · 阅读脚本",
+        "scrP": "某个阶段渲染出的 Bash。这就是 MetaGLens 的交付物——可读、可审计、脱离它也能运行。",
+        "scrWait": "(运行流程后即可看到生成的脚本)",
+        "atkH": "5 · 安全边界",
+        "atkP": "MetaGLens 能自动修复失败的阶段,但只改资源参数——绝不动科学参数。点击下面的探针,看真实的安全检查当场拒绝它。这些调用的是流程本身用的同一段代码。",
+        "atkWait": "点击上方任一探针,查看真实判定结果。",
+        "audH": "确定性、有测试、可审计",
+        "audP": "每个阶段都按产物校验,测试套件有数百项,生成的 Bash 可读且独立——没有任何隐藏。",
+        "footer": "MetaGLens · 确定性宏基因组流程 · 演示使用桩工具,不产生科学结果",
+    },
+}
 
 _TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"/>
@@ -248,72 +402,7 @@ pre.script{background:#0d1b2a;color:#cfe0f6;padding:16px;border-radius:12px;over
 
 <script>var BOOT=/*__BOOT__*/;</script>
 <script>
-var I18N={
- en:{title:"See it run in your browser",
-   lead:"MetaGLens turns raw metagenomic reads into genomes, taxonomy and a self-contained report — as standalone, inspectable Bash you can run without MetaGLens. Below, the real 12-stage pipeline runs end to end in seconds.",
-   honestyTag:"Demo note",
-   honesty:"This demo uses stub tools and produces NO scientific results. What runs is the real control flow, state machine, product validation and report generator — only the slow bioinformatics tools are stubbed. That is exactly what proves the generated scripts are standalone.",
-   nav:["Why","History","Configure","Run","Report","Script","Attack","Audit"],
-   whyH:"Why it exists",
-   whyP:"Lab servers often forbid installing metered AI agents. MetaGLens is the deterministic answer: no API key, no outbound calls during analysis, no per-use cost — just Bash you own.",
-   histH:"How AI Coding built this",
-   histP:"An AI-Science idea, turned by AI Coding into software that needs no AI to run.",
-   hist1b:"AI for Science",
-   hist1:"It began with a bundle of 9 skills we built ourselves, letting an AI agent orchestrate the metagenomics workflow — filling in shell templates stage by stage.",
-   hist2b:"AI Coding",
-   hist2:"AI then distilled that agent behaviour into deterministic software: a CLI plus ~4000 lines of Bash, with the reasoning captured as readable rules. This is the competition entry.",
-   hist3b:"No AI left in the product",
-   hist3:"At runtime there is zero AI: no key, no model call, no outbound network. That is a deliberate design principle for locked-down lab servers — a feature, not a gap.",
-   cfgH:"1 · Configure",
-   cfgP:"Pick a route. On the full tool it discovers samples, checks hardware and databases, and writes a shareable metaglens.yaml.",
-   cfgProject:"Project", cfgRoute:"Route",
-   runH:"2 · Run",
-   runP:"Click run. The real stage scripts execute against a stub toolchain and finish in seconds.",
-   runBtn:"Run the pipeline",
-   repH:"3 · Report",
-   repP:"A self-contained HTML report, generated from this run's outputs.",
-   scrH:"4 · Read the script",
-   scrP:"The rendered Bash for one stage. This is what MetaGLens delivers — readable, auditable, runnable without it.",
-   scrWait:"(run the pipeline to see a generated script)",
-   atkH:"5 · Try to break it",
-   atkP:"MetaGLens can auto-repair a failed stage, but only resource changes — never scientific parameters. Click a probe and watch the real safety check refuse it. These call the same code the pipeline uses.",
-   atkWait:"Click a probe above to see the real verdict.",
-   audH:"Built and reviewed by two AI agents",
-   audP:"Two agents developed this in tandem and independently reviewed each other, with a full WORKLOG and git trail.",
-   footer:"MetaGLens · deterministic shotgun-metagenomics · demo uses stub tools, no scientific output"},
- zh:{title:"在浏览器里看它跑起来",
-   lead:"MetaGLens 把宏基因组原始 reads 变成基因组、物种分类和一份自包含报告——产物是可独立运行、可审计的 Bash 脚本,不依赖 MetaGLens 本身。下面这条真实的 12 阶段流程会在几秒内端到端跑完。",
-   honestyTag:"演示说明",
-   honesty:"本演示使用桩工具,不产生任何科学结果。真正运行的是完整的控制流、状态机、产物验证与报告生成器,只把耗时的生信工具换成了桩——这恰好证明了生成的脚本可以独立运行。",
-   nav:["为什么","历程","配置","运行","报告","脚本","攻击","审计"],
-   whyH:"为什么需要它",
-   whyP:"实验室服务器常常不允许安装计费型 AI agent。MetaGLens 是确定性的答案:零密钥、分析期间零外呼、零按次计费——只有你自己拥有的 Bash。",
-   histH:"AI Coding 如何造出它",
-   histP:"一个 AI for Science 的想法,被 AI Coding 变成了运行时不需要 AI 的软件。",
-   hist1b:"AI for Science",
-   hist1:"起点是我们自己做的 9 个 skill 组成的技能包,让 AI agent 编排整条宏基因组流程——逐阶段填充 shell 模板。",
-   hist2b:"AI Coding",
-   hist2:"随后 AI 把这套 agent 行为蒸馏成确定性软件:一个 CLI 加约 4000 行 Bash,把推理沉淀为可读的规则。这才是参赛作品。",
-   hist3b:"产品里不留 AI",
-   hist3:"运行时零 AI:无密钥、无模型调用、无对外网络。这是面向封闭实验室服务器的刻意设计原则——是特性,不是缺陷。",
-   cfgH:"1 · 配置",
-   cfgP:"选择一条分析路线。在完整工具上它会发现样本、检查硬件与数据库,并写出可分享的 metaglens.yaml。",
-   cfgProject:"项目", cfgRoute:"路线",
-   runH:"2 · 运行",
-   runP:"点击运行。真实的阶段脚本对着桩工具链执行,几秒内完成。",
-   runBtn:"运行流程",
-   repH:"3 · 报告",
-   repP:"一份自包含的 HTML 报告,由本次运行的产物生成。",
-   scrH:"4 · 阅读脚本",
-   scrP:"某个阶段渲染出的 Bash。这就是 MetaGLens 的交付物——可读、可审计、脱离它也能运行。",
-   scrWait:"(运行流程后即可看到生成的脚本)",
-   atkH:"5 · 试着攻破它",
-   atkP:"MetaGLens 能自动修复失败的阶段,但只改资源参数——绝不动科学参数。点击下面的探针,看真实的安全检查当场拒绝它。这些调用的是流程本身用的同一段代码。",
-   atkWait:"点击上方任一探针,查看真实判定结果。",
-   audH:"由两个 AI agent 协作开发并互审",
-   audP:"两个 agent 并行开发、互相独立审查,全程留有 WORKLOG 与 git 审计轨迹。",
-   footer:"MetaGLens · 确定性宏基因组流程 · 演示使用桩工具,不产生科学结果"}
-};
+var I18N=/*__I18N__*/;
 var LANG="en";
 function t(k){return (I18N[LANG]&&I18N[LANG][k])||k;}
 function $(s){return document.querySelector(s);}
