@@ -59,8 +59,8 @@ pre.logtail{background:#0d1b2a;color:#cfe0f6;padding:14px;border-radius:10px;ove
 </header>
 <div class="meta">
 <div class="chip">Project: <b>demo</b></div>
-<div class="chip">Route: <b>mag_per_sample</b></div>
-<div class="chip">Stages: <b>12/12</b></div>
+<div class="chip">Route: <b>contig_based</b></div>
+<div class="chip">Stages: <b>7/7</b></div>
 <div class="chip">Current stage: <span class="empty">no active stage</span></div>
 <div class="chip">CPU ~100% · RAM 11/498 GB · disk free 1068 GB</div>
 </div>
@@ -69,18 +69,13 @@ pre.logtail{background:#0d1b2a;color:#cfe0f6;padding:14px;border-radius:10px;ove
 <div class="card">
 <h2>Pipeline</h2>
 
-<div class="tl-row"><div class="tl-step">00_setup</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:43 → 2026-08-03 18:25:44 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">01_qc</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:44 → 2026-08-03 18:25:45 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">02_assembly</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:45 → 2026-08-03 18:25:46 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">03_mapping</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:46 → 2026-08-03 18:25:47 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">04_binning</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:47 → 2026-08-03 18:25:49 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">05_checkm</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:49 → 2026-08-03 18:25:50 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">06_derep</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:50 → 2026-08-03 18:25:50 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">07_taxonomy</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:51 → 2026-08-03 18:25:51 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">mag_abundance</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:52 → 2026-08-03 18:25:53 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">08_annotation</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:54 → 2026-08-03 18:25:55 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">10_community</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:55 → 2026-08-03 18:25:56 (×1)</div></div>
-<div class="tl-row"><div class="tl-step">11_delivery</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:56 → 2026-08-03 18:25:57 (×1)</div></div>
+<div class="tl-row"><div class="tl-step">00_setup</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:57 → 2026-08-03 18:25:59 (×1)</div></div>
+<div class="tl-row"><div class="tl-step">01_qc</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:25:59 → 2026-08-03 18:26:00 (×1)</div></div>
+<div class="tl-row"><div class="tl-step">02_assembly</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:26:00 → 2026-08-03 18:26:01 (×1)</div></div>
+<div class="tl-row"><div class="tl-step">03_mapping</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:26:02 → 2026-08-03 18:26:02 (×1)</div></div>
+<div class="tl-row"><div class="tl-step">09_contig</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:26:02 → 2026-08-03 18:26:03 (×1)</div></div>
+<div class="tl-row"><div class="tl-step">10_community</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:26:03 → 2026-08-03 18:26:04 (×1)</div></div>
+<div class="tl-row"><div class="tl-step">11_delivery</div><div class="tl-bar"><div class="tl-fill" style="width:100%;background:var(--good)"></div></div><div class="tl-meta">completed · 2026-08-03 18:26:04 → 2026-08-03 18:26:05 (×1)</div></div>
 </div>
 <div class="card">
 <h2>Log — (none)</h2>

@@ -27,7 +27,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from .jobs import JobManager
-from .page import build_page
+from .page import DEMO_ROUTES, build_page
 
 _ID_RE = re.compile(r"^[0-9a-f]{8,32}$")   # only ids we could have minted
 _MAX_BODY = 4096                            # a run request is tiny
@@ -214,36 +214,46 @@ def export_static(out_dir: str, route: str = "mag_per_sample") -> Path:
 
     tmp = tempfile.mkdtemp(prefix="metaglens_export_")
     try:
-        result = run_demo(route, workdir=tmp)
-        report = result.get("report_html", "")
-        monitor = result.get("monitor_html", "")
-        if report and Path(report).is_file():
-            (out / "report.html").write_bytes(Path(report).read_bytes())
-        if monitor and Path(monitor).is_file():
-            (out / "monitor.html").write_bytes(Path(monitor).read_bytes())
         from .. import routes
         from .jobs import SHOWCASE_SCRIPT_STAGE
-        script = (Path(result.get("root", "")) / "work" / "metaglens_results"
-                  / routes.STEPS[SHOWCASE_SCRIPT_STAGE].script)
-        script_text = ""
-        if script.is_file():
-            (out / "script.txt").write_bytes(script.read_bytes())
-            script_text = script.read_text(encoding="utf-8", errors="replace")
+        script_name = routes.STEPS[SHOWCASE_SCRIPT_STAGE].script
 
-        # Inline the artefacts into the page. A judge may well download the export
-        # and open index.html straight off disk, and under file:// a browser
-        # refuses fetch() of sibling files (opaque origin) and can block the
-        # report iframe too. Inlining keeps the export working from disk as well
-        # as over http://; the separate files stay for direct viewing.
-        report_text = ""
-        if report and Path(report).is_file():
-            report_text = Path(report).read_text(encoding="utf-8", errors="replace")
+        # Bake both demo routes so the static page can switch mag/contig in the
+        # browser without re-running anything. Each route keeps its own report
+        # and script files for direct viewing, and everything is inlined into
+        # index.html as well (file:// forbids fetch() of sibling files).
+        boot_extra: dict = {"routes": list(DEMO_ROUTES)}
+        for rt in DEMO_ROUTES:
+            result = run_demo(rt, workdir=tmp)
+            report = result.get("report_html", "")
+            monitor = result.get("monitor_html", "")
+            if report and Path(report).is_file():
+                (out / f"report_{rt}.html").write_bytes(Path(report).read_bytes())
+            if monitor and Path(monitor).is_file():
+                (out / f"monitor_{rt}.html").write_bytes(Path(monitor).read_bytes())
+            script = (Path(result.get("root", "")) / "work" / "metaglens_results"
+                      / script_name)
+            script_text = ""
+            if script.is_file():
+                (out / f"script_{rt}.txt").write_bytes(script.read_bytes())
+                script_text = script.read_text(encoding="utf-8", errors="replace")
+            report_text = ""
+            if report and Path(report).is_file():
+                report_text = Path(report).read_text(encoding="utf-8", errors="replace")
+            boot_extra[f"reportHtml_{rt}"] = report_text
+            boot_extra[f"scriptText_{rt}"] = script_text
+
+        # Backwards-compatible copies under the single-route names.
+        if route in DEMO_ROUTES:
+            (out / "report.html").write_bytes((out / f"report_{route}.html").read_bytes())
+            (out / "monitor.html").write_bytes((out / f"monitor_{route}.html").read_bytes())
+            (out / "script.txt").write_bytes((out / f"script_{route}.txt").read_bytes())
+        boot_extra["reportHtml"] = boot_extra.get(f"reportHtml_{route}", "")
+        boot_extra["scriptText"] = boot_extra.get(f"scriptText_{route}", "")
+        boot_extra["scriptName"] = script_name
+
         (out / "index.html").write_text(
-            build_page(static=True, boot_extra={
-                "scriptText": script_text,
-                "reportHtml": report_text,
-                "scriptName": routes.STEPS[SHOWCASE_SCRIPT_STAGE].script,
-            }),
+            build_page(static=True, boot_extra=boot_extra),
             encoding="utf-8",
         )
     finally:

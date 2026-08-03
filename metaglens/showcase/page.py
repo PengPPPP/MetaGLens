@@ -293,7 +293,7 @@ if(BOOT.logo){$("#logo").src=BOOT.logo;}else{$("#logo").replaceWith(Object.assig
 
 // route select
 (function(){var sel=$("#f-route");BOOT.routes.forEach(function(r){var o=document.createElement("option");o.value=r;o.textContent=r;sel.appendChild(o);});
-  sel.onchange=renderYaml;})();
+  sel.onchange=function(){renderYaml();if(BOOT.static){showBaked();}};})();
 function renderYaml(){$("#cfg-yaml").textContent="route_name: "+$("#f-route").value+"  ·  conda_mode: reuse  ·  exec_env: local";}
 
 // nav + i18n
@@ -335,10 +335,15 @@ function setStages(list){var box=$("#stages");box.innerHTML="";(list||[]).forEac
 function showBaked(){
   // Static export: render from content inlined in this file, so it works when
   // opened straight off disk (file:// forbids fetch() of sibling files).
-  if(BOOT.reportHtml){$("#report-frame").srcdoc=BOOT.reportHtml;}
-  else{$("#report-frame").src="report.html";}
-  if(BOOT.scriptText){$("#script-box").textContent=BOOT.scriptText;}
-  else{fetch("script.txt").then(function(r){return r.text();})
+  // Both demo routes are baked, so switching the route select re-renders that
+  // route's pre-recorded report and script without re-running anything.
+  var r=$("#f-route").value;
+  var rh=BOOT["reportHtml_"+r]||BOOT.reportHtml;
+  var st=BOOT["scriptText_"+r]||BOOT.scriptText;
+  if(rh){$("#report-frame").srcdoc=rh;}
+  else{$("#report-frame").src="report_"+r+".html";}
+  if(st){$("#script-box").textContent=st;}
+  else{fetch("script_"+r+".txt").then(function(r2){return r2.text();})
         .then(function(x){$("#script-box").textContent=x;}).catch(function(){});}
 }
 function startRun(){
