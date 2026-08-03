@@ -43,3 +43,6 @@ preview/
 
 # 署名源图(已以 base64 打包进 metaglens/templates/credit_banner.b64)
 /Developed by PengPPPP - Fudan University.png
+
+# 横幅源图(发布版在 assets/banner.png)
+/MetaGLens-software封面-片头(1).png
